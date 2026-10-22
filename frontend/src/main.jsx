@@ -4,6 +4,7 @@ import './style.css';
 import { api, canUseSelfService, formatWib, jakartaDate, shiftDate, timeInputWib } from './shared.js';
 import { ExamResultPanel, ExamScheduleEditor, KPIExam, KPIExamResults } from './exam-panels.jsx';
 import { EmployeeEditor } from './employee-editor.jsx';
+import { AttendanceMap } from './attendance-map.jsx';
 
 try {
   const storedTheme = window.localStorage.getItem('hris-theme');
@@ -132,7 +133,7 @@ function Login({ onLogin }) {
                 onChange={(event) => setPassword(event.target.value)}
               />
               <button className="primary auth-submit" disabled={busy}>
-                {busy ? 'Memeriksa...' : 'Masuk ke aplikasi'}
+                {busy ? 'Memeriksa...' : 'Login'}
                 {!busy && <span aria-hidden="true">→</span>}
               </button>
             </form>
@@ -443,6 +444,33 @@ function AttendancePanel() {
               <div><span>Masuk</span><strong>{formatWib(record.check_in_at, { hour: '2-digit', minute: '2-digit' })} WIB</strong></div>
               <div><span>Status</span><strong>{record.late ? `Terlambat${record.late_minutes ? ` ${record.late_minutes} menit` : ' kurang dari 1 menit'}` : 'Tepat waktu'}</strong></div>
               <div><span>Pulang</span><strong>{record.check_out_at ? `${formatWib(record.check_out_at, { hour: '2-digit', minute: '2-digit' })} WIB` : 'Belum absen'}</strong></div>
+            </div>
+          )}
+          {record && (record.check_in_outside_geofence || record.check_out_outside_geofence) && (
+            <div className="alert error" role="alert">
+              <strong>Absensi tercatat di luar area kantor.</strong> Lokasi Anda ditandai pada peta di bawah. Data ini dilaporkan ke HR sebagai ketidakpatuhan aturan absensi.
+            </div>
+          )}
+          {record && record.check_in_latitude != null && (
+            <div className="attendance-map-wrap">
+              <div className="section-heading"><div><div className="eyebrow">PETA LOKASI ABSENSI</div><h3>Lokasi masuk & pulang hari ini</h3></div></div>
+              <AttendanceMap
+                office={today?.geofence_center ? { ...today.geofence_center, radius_meters: today.geofence_radius_meters } : null}
+                markers={[
+                  record.check_in_latitude != null ? {
+                    latitude: record.check_in_latitude, longitude: record.check_in_longitude,
+                    outside: record.check_in_outside_geofence,
+                    title: `Absen masuk ${formatWib(record.check_in_at, { hour: '2-digit', minute: '2-digit' })} WIB`,
+                    detail: `${record.check_in_distance_meters} m dari kantor${record.check_in_outside_geofence ? ' · DI LUAR AREA' : ''}`,
+                  } : null,
+                  record.check_out_latitude != null ? {
+                    latitude: record.check_out_latitude, longitude: record.check_out_longitude,
+                    outside: record.check_out_outside_geofence,
+                    title: `Absen pulang ${formatWib(record.check_out_at, { hour: '2-digit', minute: '2-digit' })} WIB`,
+                    detail: `${record.check_out_distance_meters ?? '—'} m dari kantor${record.check_out_outside_geofence ? ' · DI LUAR AREA' : ''}`,
+                  } : null,
+                ].filter(Boolean)}
+              />
             </div>
           )}
         </>
@@ -1729,6 +1757,9 @@ function AttendanceReport({ user, branches, branchID, onBranchChange }) {
   useEffect(() => { loadReport(); }, [loadReport]);
   const totalLateMinutes = rows.reduce((total, record) => total + record.late_minutes, 0);
   const lateRecords = rows.filter((record) => record.late).length;
+  const outsideRecords = rows.filter((record) => record.check_in_outside_geofence || record.check_out_outside_geofence);
+  const outsideCount = outsideRecords.length;
+  const [mapRecord, setMapRecord] = useState(null);
 
   function updateCorrection(record, field, value) {
     setCorrections((current) => ({
@@ -1800,21 +1831,53 @@ function AttendanceReport({ user, branches, branchID, onBranchChange }) {
         <div><span>Catatan absensi pada periode</span><strong>{busy ? 'Memuat…' : rows.length}</strong></div>
         <div><span>Kejadian terlambat</span><strong>{busy ? 'Memuat…' : lateRecords}</strong></div>
         <div><span>Total menit terlambat</span><strong>{busy ? 'Memuat…' : totalLateMinutes}</strong></div>
+        <div><span>Absen di luar area kantor</span><strong className={outsideCount ? 'text-danger' : ''}>{busy ? 'Memuat…' : outsideCount}</strong></div>
       </div>
+      {mapRecord && (
+        <div className="attendance-map-wrap">
+          <div className="section-heading">
+            <div><div className="eyebrow">PETA LOKASI</div><h3>{mapRecord.full_name} · {formatWib(`${mapRecord.date}T00:00:00+07:00`, { dateStyle: 'long' })}</h3></div>
+            <button type="button" className="secondary compact" onClick={() => setMapRecord(null)}>Tutup peta</button>
+          </div>
+          <AttendanceMap
+            markers={[
+              mapRecord.check_in_latitude != null ? {
+                latitude: mapRecord.check_in_latitude, longitude: mapRecord.check_in_longitude,
+                outside: mapRecord.check_in_outside_geofence,
+                title: `Masuk ${formatWib(mapRecord.check_in_at, { hour: '2-digit', minute: '2-digit' })} WIB`,
+                detail: `${mapRecord.check_in_distance_meters} m dari kantor${mapRecord.check_in_outside_geofence ? ' · DI LUAR AREA' : ''}`,
+              } : null,
+              mapRecord.check_out_latitude != null ? {
+                latitude: mapRecord.check_out_latitude, longitude: mapRecord.check_out_longitude,
+                outside: mapRecord.check_out_outside_geofence,
+                title: `Pulang ${formatWib(mapRecord.check_out_at, { hour: '2-digit', minute: '2-digit' })} WIB`,
+                detail: `${mapRecord.check_out_distance_meters ?? '—'} m dari kantor${mapRecord.check_out_outside_geofence ? ' · DI LUAR AREA' : ''}`,
+              } : null,
+            ].filter(Boolean)}
+          />
+        </div>
+      )}
       <div className="table-wrap attendance-table">
         <table>
-          <thead><tr><th>Tanggal</th><th>Karyawan</th><th>Cabang</th><th>Masuk</th><th>Status</th><th>Pulang</th>{isHR && <th>Koreksi</th>}</tr></thead>
+          <thead><tr><th>Tanggal</th><th>Karyawan</th><th>Cabang</th><th>Masuk</th><th>Status</th><th>Pulang</th><th>Peta</th>{isHR && <th>Koreksi</th>}</tr></thead>
           <tbody>
-            {busy && rows.length === 0 ? <tr><td colSpan={isHR ? '7' : '6'} className="empty">Memuat rekap...</td></tr>
-              : rows.length === 0 ? <tr><td colSpan={isHR ? '7' : '6'} className="empty">Belum ada catatan untuk periode ini.</td></tr>
+            {busy && rows.length === 0 ? <tr><td colSpan={isHR ? '8' : '7'} className="empty">Memuat rekap...</td></tr>
+              : rows.length === 0 ? <tr><td colSpan={isHR ? '8' : '7'} className="empty">Belum ada catatan untuk periode ini.</td></tr>
                 : rows.map((record) => (
                   <tr key={record.id}>
                     <td>{formatWib(`${record.date}T00:00:00+07:00`, { dateStyle: 'medium' })}</td>
                     <td><strong>{record.full_name}</strong><small className="subtext">{record.employee_number}</small></td>
                     <td>{record.branch_name}</td>
-                    <td>{formatWib(record.check_in_at, { hour: '2-digit', minute: '2-digit' })}</td>
+                    <td><div className="cell-stack">
+                      {formatWib(record.check_in_at, { hour: '2-digit', minute: '2-digit' })}
+                      {record.check_in_outside_geofence && <span className="geo-warn">Di luar area</span>}
+                    </div></td>
                     <td>{record.late ? `Terlambat ${record.late_minutes || '<1'} menit` : 'Tepat waktu'}</td>
-                    <td>{formatWib(record.check_out_at, { hour: '2-digit', minute: '2-digit' })}</td>
+                    <td><div className="cell-stack">
+                      {formatWib(record.check_out_at, { hour: '2-digit', minute: '2-digit' })}
+                      {record.check_out_outside_geofence && <span className="geo-warn">Di luar area</span>}
+                    </div></td>
+                    <td><button type="button" className="secondary compact" onClick={() => setMapRecord(record)} disabled={record.check_in_latitude == null}>Lokasi</button></td>
                     {isHR && <td>
                       <details className="correction-details">
                         <summary>Koreksi jam</summary>
@@ -1952,7 +2015,12 @@ function Dashboard({ user, onLogout }) {
     }
   }, [branchFilter, isHR, user.role]);
 
-  useEffect(() => { loadData(); }, [loadData]);
+  // Dependensi hanya nilai stabil: user ID, peran, dan filter cabang.
+  // Objek `user` berubah referensinya pada beberapa alur sehingga tidak boleh dipakai
+  // sebagai dependensi langsung (memicu efek berulang dan halaman kosong).
+  const userID = user.id;
+  const userRole = user.role;
+  useEffect(() => { loadData(); }, [loadData, userID, userRole]);
   useEffect(() => {
     const updateRoute = () => setRoute(window.location.hash.slice(1) || '/home');
     window.addEventListener('hashchange', updateRoute);
@@ -2258,12 +2326,20 @@ function App() {
   const [refreshKey, setRefreshKey] = useState(0);
 
   useEffect(() => {
+    // Setelah login, data pengguna sudah diterima dari respons login.
+    // Jangan memanggil ulang /auth/me karena kegagalan sesaat dapat menghapus sesi.
+    if (user) {
+      setLoading(false);
+      return undefined;
+    }
     let active = true;
+    setLoading(true);
     api('/api/v1/auth/me')
       .then((profile) => { if (active) setUser(profile); })
       .catch(() => { if (active) setUser(null); })
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [refreshKey]);
 
   if (loading) {

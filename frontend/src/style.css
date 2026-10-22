@@ -837,3 +837,92 @@ html[data-theme="dark"] .leave-request-form + .table-wrap { margin-top: 4px; }
 @media (max-width: 760px) {
   .panel { padding: 18px 16px; }
 }
+
+/* ===== Mode gelap menyeluruh: semua komponen berlatar putih ikut gelap ===== */
+html[data-theme="dark"] .kpi-target-builder,
+html[data-theme="dark"] .kpi-goal-editor,
+html[data-theme="dark"] .kpi-goal-card,
+html[data-theme="dark"] .kpi-appeal-box,
+html[data-theme="dark"] .kpi-self-view,
+html[data-theme="dark"] .leave-balance-grid > div,
+html[data-theme="dark"] .location-card,
+html[data-theme="dark"] .leave-approvals,
+html[data-theme="dark"] .summary-card,
+html[data-theme="dark"] .card,
+html[data-theme="dark"] .panel,
+html[data-theme="dark"] .quick-link-card,
+html[data-theme="dark"] .profile-grid div,
+html[data-theme="dark"] .attendance-today-grid div,
+html[data-theme="dark"] .report-filters,
+html[data-theme="dark"] .report-downloads,
+html[data-theme="dark"] .exam-schedule-card,
+html[data-theme="dark"] .exam-question,
+html[data-theme="dark"] .employee-editor-panel,
+html[data-theme="dark"] .employee-profile-panel {
+  background: #14212c;
+  border-color: #263846;
+  color: #c8d7e2;
+}
+
+html[data-theme="dark"] .kpi-target-builder .eyebrow,
+html[data-theme="dark"] .kpi-self-view .eyebrow,
+html[data-theme="dark"] .kpi-report-heading .eyebrow { color: #7fb9b2; }
+
+html[data-theme="dark"] .kpi-builder-actions span,
+html[data-theme="dark"] .kpi-appeal-box p,
+html[data-theme="dark"] .kpi-report-goals span,
+html[data-theme="dark"] .kpi-goal-card p,
+html[data-theme="dark"] .kpi-goal-card .muted,
+html[data-theme="dark"] .profile-grid span,
+html[data-theme="dark"] .attendance-today-grid span,
+html[data-theme="dark"] .summary-card span,
+html[data-theme="dark"] .summary-card small { color: #93a8b8; }
+
+html[data-theme="dark"] .kpi-goal-card h3,
+html[data-theme="dark"] .kpi-target-builder h3,
+html[data-theme="dark"] .summary-card strong,
+html[data-theme="dark"] .profile-grid strong,
+html[data-theme="dark"] .attendance-today-grid strong { color: #e8f0f6; }
+
+html[data-theme="dark"] .kpi-evaluation-form textarea,
+html[data-theme="dark"] .kpi-decision-form textarea,
+html[data-theme="dark"] .kpi-appeal-box textarea,
+html[data-theme="dark"] .leave-decision-form textarea,
+html[data-theme="dark"] .correction-form input {
+  background: #101c26; border-color: #2a3c49; color: #dce8f1;
+}
+
+html[data-theme="dark"] .kpi-goal-editor .section-heading,
+html[data-theme="dark"] .kpi-goal-card .section-heading,
+html[data-theme="dark"] .kpi-target-builder .section-heading { border-color: #263846; }
+
+html[data-theme="dark"] .correction-details summary { color: #84c7de; }
+html[data-theme="dark"] .app-footer { border-top: 0; }
+
+/* Panel HR & manager: jam, filter, dan tombol di dalam panel */
+html[data-theme="dark"] .inline-filter,
+html[data-theme="dark"] .report-filters label,
+html[data-theme="dark"] .kpi-filters label { color: #9fb2c2; }
+html[data-theme="dark"] .attendance-action-row .secondary { background: #1c2f3d; border-color: #2e4553; color: #d2e3ee; }
+
+/* ===== Peta absensi & indikator area kantor ===== */
+.attendance-map-wrap { margin: 18px 0 4px; }
+.attendance-map { width: 100%; height: 320px; border: 1px solid #dde6ea; border-radius: 14px; overflow: hidden; background: #eef3f5; z-index: 0; }
+.attendance-pin { background: transparent; border: 0; }
+.attendance-pin span { display: block; width: 18px; height: 18px; border: 3px solid #fff; border-radius: 50%; box-shadow: 0 2px 8px rgba(0, 0, 0, .35); }
+.leaflet-container { font: inherit; }
+.cell-stack { display: grid; gap: 4px; }
+.geo-warn { display: inline-flex; align-items: center; gap: 4px; width: fit-content; padding: 2px 7px; border-radius: 999px; background: #fde7e1; color: #a63a22; font-size: .64rem; font-weight: 750; letter-spacing: .02em; }
+.geo-warn::before { content: '?'; font-size: .55rem; }
+.text-danger { color: #b23c22 !important; }
+
+@media (max-width: 760px) {
+  .attendance-map { height: 240px; }
+}
+
+html[data-theme="dark"] .attendance-map { border-color: #263846; background: #16242f; }
+html[data-theme="dark"] .geo-warn { background: #3a231e; color: #ffb39c; }
+html[data-theme="dark"] .text-danger { color: #ffb39c !important; }
+html[data-theme="dark"] .leaflet-tile { filter: brightness(.82) contrast(.95) saturate(.9); }
+html[data-theme="dark"] .leaflet-bar a { background: #1b2b37; color: #dbe7ef; border-color: #2c404e; }
+html[data-theme="dark"] .leaflet-popup-content-wrapper, html[data-theme="dark"] .leaflet-popup-tip { background: #172634; color: #dbe7ef; }

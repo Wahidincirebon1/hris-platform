@@ -73,6 +73,12 @@ type attendanceRecord struct {
 	CheckOutAt            *time.Time `json:"check_out_at"`
 	CheckOutDistance      *float64   `json:"check_out_distance_meters"`
 	CheckOutAccuracy      *float64   `json:"check_out_accuracy_meters"`
+	CheckInLatitude       *float64   `json:"check_in_latitude,omitempty"`
+	CheckInLongitude      *float64   `json:"check_in_longitude,omitempty"`
+	CheckInOutside        bool       `json:"check_in_outside_geofence"`
+	CheckOutLatitude      *float64   `json:"check_out_latitude,omitempty"`
+	CheckOutLongitude     *float64   `json:"check_out_longitude,omitempty"`
+	CheckOutOutside       bool       `json:"check_out_outside_geofence"`
 }
 
 type scheduleResponse struct {
@@ -163,6 +169,10 @@ func (a *API) attendanceToday(w http.ResponseWriter, r *http.Request) {
 		"date": date.Format("2006-01-02"), "is_workday": workday,
 		"schedule": schedule.response(), "geofence_configured": geofenceConfigured,
 		"geofence_radius_meters":      geofenceRadius(geofence),
+		"geofence_center": map[string]any{
+			"latitude": geofence.Latitude, "longitude": geofence.Longitude,
+			"name": user.BranchName, "radius_meters": geofence.RadiusMeters,
+		},
 		"maximum_gps_accuracy_meters": maxAttendanceGPSAccuracyMeters,
 		"record":                      record, "year_to_date": yearToDate,
 	})
@@ -592,10 +602,14 @@ func (a *API) checkIn(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	distance, status, message := validateLocation(input, geofence)
-	if status != http.StatusOK {
+	if status == http.StatusBadRequest || status == http.StatusUnprocessableEntity {
+		// GPS tidak valid atau akurasinya buruk: data lokasi tidak layak dipercaya.
 		writeError(w, status, message)
 		return
 	}
+	// Di luar area kantor bukan alasan menolak absensi: tetap dicatat sebagai
+	// pelanggaran beserta koordinatnya agar HR dapat menelusuri di peta.
+	outsideGeofence := status == http.StatusForbidden
 	lateMinutes, late, err := calculateLateMinutes(now, localNow, schedule.WorkStart)
 	if err != nil {
 		log.Printf("calculate check-in lateness failed: %v", err)
@@ -606,11 +620,13 @@ func (a *API) checkIn(w http.ResponseWriter, r *http.Request) {
 	err = tx.QueryRow(r.Context(), `
 		INSERT INTO attendance_records
 			(user_id, branch_id, attendance_date, schedule_id, check_in_geofence_id,
-			 check_in_at, check_in_distance_meters, check_in_accuracy_meters, late, late_minutes)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+			 check_in_at, check_in_distance_meters, check_in_accuracy_meters, late, late_minutes,
+			 check_in_latitude, check_in_longitude, check_in_outside_geofence)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
 		RETURNING id
 	`, user.ID, user.BranchID, date, schedule.ID, geofence.ID, now,
-		distance, input.Accuracy, late, lateMinutes).Scan(&recordID)
+		distance, input.Accuracy, late, lateMinutes,
+		input.Latitude, input.Longitude, outsideGeofence).Scan(&recordID)
 	if err != nil {
 		if isUniqueViolation(err) {
 			writeError(w, http.StatusConflict, "Absen masuk hari ini sudah tercatat.")
@@ -622,8 +638,9 @@ func (a *API) checkIn(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := insertAudit(r.Context(), tx, user.ID, "ATTENDANCE_CHECK_IN", "attendance", recordID.String(), map[string]string{
 		"date": date.Format("2006-01-02"), "distance_meters": strconv.FormatFloat(distance, 'f', 1, 64),
-		"accuracy_meters": strconv.FormatFloat(input.Accuracy, 'f', 1, 64),
-		"late_minutes":    strconv.Itoa(lateMinutes),
+		"accuracy_meters":  strconv.FormatFloat(input.Accuracy, 'f', 1, 64),
+		"late_minutes":     strconv.Itoa(lateMinutes),
+		"outside_geofence": boolToString(outsideGeofence),
 	}); err != nil {
 		log.Printf("audit check-in failed: %v", err)
 		writeError(w, http.StatusInternalServerError, "Absen masuk tidak dapat disimpan.")
@@ -673,10 +690,11 @@ func (a *API) checkOut(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	distance, status, message := validateLocation(input, geofence)
-	if status != http.StatusOK {
+	if status == http.StatusBadRequest || status == http.StatusUnprocessableEntity {
 		writeError(w, status, message)
 		return
 	}
+	outsideGeofence := status == http.StatusForbidden
 	var recordID uuid.UUID
 	var checkInAt time.Time
 	var checkOutAt pgtype.Timestamptz
@@ -707,16 +725,20 @@ func (a *API) checkOut(w http.ResponseWriter, r *http.Request) {
 		UPDATE attendance_records
 		SET check_out_geofence_id = $1, check_out_at = $2,
 		    check_out_distance_meters = $3, check_out_accuracy_meters = $4,
+		    check_out_latitude = $6, check_out_longitude = $7,
+		    check_out_outside_geofence = $8,
 		    updated_at = now()
 		WHERE id = $5
-	`, geofence.ID, now, distance, input.Accuracy, recordID); err != nil {
+	`, geofence.ID, now, distance, input.Accuracy, recordID,
+		input.Latitude, input.Longitude, outsideGeofence); err != nil {
 		log.Printf("update attendance check-out failed: %v", err)
 		writeError(w, http.StatusInternalServerError, "Absen pulang tidak dapat disimpan.")
 		return
 	}
 	if err := insertAudit(r.Context(), tx, user.ID, "ATTENDANCE_CHECK_OUT", "attendance", recordID.String(), map[string]string{
 		"date": date.Format("2006-01-02"), "distance_meters": strconv.FormatFloat(distance, 'f', 1, 64),
-		"accuracy_meters": strconv.FormatFloat(input.Accuracy, 'f', 1, 64),
+		"accuracy_meters":  strconv.FormatFloat(input.Accuracy, 'f', 1, 64),
+		"outside_geofence": boolToString(outsideGeofence),
 	}); err != nil {
 		log.Printf("audit check-out failed: %v", err)
 		writeError(w, http.StatusInternalServerError, "Absen pulang tidak dapat disimpan.")
@@ -884,7 +906,9 @@ func queryAttendance(ctx context.Context, q interface {
 		SELECT r.id, r.user_id, e.employee_number, e.full_name, u.role,
 		       r.branch_id, b.name, r.attendance_date, r.check_in_at,
 		       r.check_in_distance_meters, r.check_in_accuracy_meters, r.late, r.late_minutes,
-		       r.check_out_at, r.check_out_distance_meters, r.check_out_accuracy_meters
+		       r.check_out_at, r.check_out_distance_meters, r.check_out_accuracy_meters,
+		       r.check_in_latitude, r.check_in_longitude, r.check_in_outside_geofence,
+		       r.check_out_latitude, r.check_out_longitude, r.check_out_outside_geofence
 		FROM attendance_records r
 		JOIN users u ON u.id = r.user_id
 		JOIN employees e ON e.user_id = r.user_id
@@ -905,14 +929,21 @@ func queryAttendance(ctx context.Context, q interface {
 		var date time.Time
 		var checkOutAt pgtype.Timestamptz
 		var checkOutDistance, checkOutAccuracy pgtype.Float8
+		var checkInLat, checkInLng, checkOutLat, checkOutLng pgtype.Float8
 		if err := rows.Scan(
 			&record.ID, &record.UserID, &record.EmployeeNumber, &record.FullName,
 			&record.Role, &record.BranchID, &record.BranchName, &date,
 			&record.CheckInAt, &record.CheckInDistanceMeters, &record.CheckInAccuracyMeters,
 			&record.Late, &record.LateMinutes, &checkOutAt, &checkOutDistance, &checkOutAccuracy,
+			&checkInLat, &checkInLng, &record.CheckInOutside,
+			&checkOutLat, &checkOutLng, &record.CheckOutOutside,
 		); err != nil {
 			return nil, err
 		}
+		record.CheckInLatitude = floatPtr(checkInLat)
+		record.CheckInLongitude = floatPtr(checkInLng)
+		record.CheckOutLatitude = floatPtr(checkOutLat)
+		record.CheckOutLongitude = floatPtr(checkOutLng)
 		record.Date = date.Format("2006-01-02")
 		if checkOutAt.Valid {
 			value := checkOutAt.Time
@@ -936,11 +967,14 @@ func loadAttendanceRecord(ctx context.Context, q rowQuerier, userID uuid.UUID, d
 	var attendanceDate time.Time
 	var checkOutAt pgtype.Timestamptz
 	var checkOutDistance, checkOutAccuracy pgtype.Float8
+	var checkInLat, checkInLng, checkOutLat, checkOutLng pgtype.Float8
 	err := q.QueryRow(ctx, `
 		SELECT r.id, r.user_id, e.employee_number, e.full_name, u.role,
 		       r.branch_id, b.name, r.attendance_date, r.check_in_at,
 		       r.check_in_distance_meters, r.check_in_accuracy_meters, r.late, r.late_minutes,
-		       r.check_out_at, r.check_out_distance_meters, r.check_out_accuracy_meters
+		       r.check_out_at, r.check_out_distance_meters, r.check_out_accuracy_meters,
+		       r.check_in_latitude, r.check_in_longitude, r.check_in_outside_geofence,
+		       r.check_out_latitude, r.check_out_longitude, r.check_out_outside_geofence
 		FROM attendance_records r
 		JOIN users u ON u.id = r.user_id
 		JOIN employees e ON e.user_id = r.user_id
@@ -951,10 +985,16 @@ func loadAttendanceRecord(ctx context.Context, q rowQuerier, userID uuid.UUID, d
 		&record.Role, &record.BranchID, &record.BranchName, &attendanceDate,
 		&record.CheckInAt, &record.CheckInDistanceMeters, &record.CheckInAccuracyMeters,
 		&record.Late, &record.LateMinutes, &checkOutAt, &checkOutDistance, &checkOutAccuracy,
+		&checkInLat, &checkInLng, &record.CheckInOutside,
+		&checkOutLat, &checkOutLng, &record.CheckOutOutside,
 	)
 	if err != nil {
 		return nil, err
 	}
+	record.CheckInLatitude = floatPtr(checkInLat)
+	record.CheckInLongitude = floatPtr(checkInLng)
+	record.CheckOutLatitude = floatPtr(checkOutLat)
+	record.CheckOutLongitude = floatPtr(checkOutLng)
 	record.Date = attendanceDate.Format("2006-01-02")
 	if checkOutAt.Valid {
 		value := checkOutAt.Time
@@ -1015,10 +1055,11 @@ func validateLocation(input locationInput, geofence officeGeofence) (float64, in
 		return 0, http.StatusUnprocessableEntity, "Akurasi GPS terlalu rendah. Coba lagi di area terbuka atau ajukan koreksi ke HR."
 	}
 	distance := haversineMeters(input.Latitude, input.Longitude, geofence.Latitude, geofence.Longitude)
+	rounded := math.Round(distance*10) / 10
 	if distance > float64(geofence.RadiusMeters) {
-		return 0, http.StatusForbidden, "Lokasi berada di luar area kantor. Jika Anda sedang bertugas di luar kantor, hubungi atasan dan HR."
+		return rounded, http.StatusForbidden, "Lokasi berada di luar area kantor."
 	}
-	return math.Round(distance*10) / 10, http.StatusOK, ""
+	return rounded, http.StatusOK, ""
 }
 
 func haversineMeters(latitude1, longitude1, latitude2, longitude2 float64) float64 {
@@ -1033,6 +1074,14 @@ func haversineMeters(latitude1, longitude1, latitude2, longitude2 float64) float
 			math.Sin(longitudeDelta/2)*math.Sin(longitudeDelta/2)
 	a = math.Max(0, math.Min(1, a))
 	return 2 * earthRadiusMeters * math.Atan2(math.Sqrt(a), math.Sqrt(1-a))
+}
+
+func floatPtr(value pgtype.Float8) *float64 {
+	if !value.Valid {
+		return nil
+	}
+	result := value.Float64
+	return &result
 }
 
 func calculateLateMinutes(instant time.Time, localNow time.Time, workStart string) (int, bool, error) {

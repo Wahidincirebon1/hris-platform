@@ -1084,19 +1084,22 @@ func (a *API) createToken(userID uuid.UUID) (string, error) {
 }
 
 func (a *API) setSessionCookie(w http.ResponseWriter, token string, maxAge time.Duration) {
+	// Path "/" agar sesi tetap berlaku untuk semua permintaan aplikasi (halaman dan API).
 	http.SetCookie(w, &http.Cookie{
-		Name: "hris_session", Value: token, Path: "/api", HttpOnly: true,
+		Name: "hris_session", Value: token, Path: "/", HttpOnly: true,
 		Secure: a.cookieSecure, SameSite: http.SameSiteStrictMode,
 		MaxAge: int(maxAge.Seconds()), Expires: time.Now().Add(maxAge),
 	})
 }
 
 func (a *API) clearSessionCookie(w http.ResponseWriter) {
-	http.SetCookie(w, &http.Cookie{
-		Name: "hris_session", Value: "", Path: "/api", HttpOnly: true,
-		Secure: a.cookieSecure, SameSite: http.SameSiteStrictMode, MaxAge: -1,
-		Expires: time.Unix(0, 0),
-	})
+	for _, path := range []string{"/", "/api"} {
+		http.SetCookie(w, &http.Cookie{
+			Name: "hris_session", Value: "", Path: path, HttpOnly: true,
+			Secure: a.cookieSecure, SameSite: http.SameSiteStrictMode, MaxAge: -1,
+			Expires: time.Unix(0, 0),
+		})
+	}
 }
 
 func (a *API) sameOrigin(next http.Handler) http.Handler {
