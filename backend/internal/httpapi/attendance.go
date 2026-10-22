@@ -16,6 +16,13 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+// canUseSelfService adalah satu-satunya sumber kebenaran hak layanan mandiri
+// (absen masuk/pulang, cuti, izin, lembur) untuk semua peran termasuk HR
+// dan superadmin, sehingga hak akses di frontend dan backend selalu konsisten.
+func canUseSelfService(role string) bool {
+	return role == "employee" || role == "manager" || role == "hr" || role == "superadmin"
+}
+
 const maxAttendanceGPSAccuracyMeters = 30
 
 var jakartaTime = time.FixedZone("WIB", 7*60*60)

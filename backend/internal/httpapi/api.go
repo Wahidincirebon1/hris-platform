@@ -93,6 +93,7 @@ func (a *API) Handler() http.Handler {
 	a.registerLeaveRoutes(mux)
 	a.registerEmployeeRequestRoutes(mux)
 	a.registerKPIRoutes(mux)
+	a.registerExamRoutes(mux)
 	a.registerReportRoutes(mux)
 	return a.securityHeaders(a.sameOrigin(mux))
 }
@@ -500,6 +501,7 @@ func (a *API) createEmployee(w http.ResponseWriter, r *http.Request) {
 		Phone             *string `json:"phone"`
 		Address           *string `json:"address"`
 		JobGrade          *string `json:"job_grade"`
+		BirthDate         *string `json:"birth_date"`
 		BranchID          string  `json:"branch_id"`
 		DepartmentID      *string `json:"department_id"`
 		PositionTitle     *string `json:"position_title"`
@@ -559,6 +561,15 @@ func (a *API) createEmployee(w http.ResponseWriter, r *http.Request) {
 		}
 	} else {
 		input.ManagerID = nil
+	}
+	var birthDate *time.Time
+	if input.BirthDate != nil && strings.TrimSpace(*input.BirthDate) != "" {
+		parsed, err := time.ParseInLocation("2006-01-02", strings.TrimSpace(*input.BirthDate), jakartaTime)
+		if err != nil || parsed.After(time.Now()) {
+			writeError(w, http.StatusBadRequest, "Tanggal lahir harus berformat YYYY-MM-DD dan tidak boleh di masa depan.")
+			return
+		}
+		birthDate = &parsed
 	}
 
 	tx, err := a.db.Begin(r.Context())
@@ -626,12 +637,21 @@ func (a *API) createEmployee(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "Akun karyawan tidak dapat dibuat.")
 		return
 	}
+	if input.NIK == nil || strings.TrimSpace(*input.NIK) == "" {
+		autoNIK, err := nextNIK(r.Context(), tx)
+		if err != nil {
+			log.Printf("generate automatic NIK failed: %v", err)
+			writeError(w, http.StatusInternalServerError, "NIK tidak dapat dibuat otomatis.")
+			return
+		}
+		input.NIK = &autoNIK
+	}
 	_, err = tx.Exec(r.Context(), `
 		INSERT INTO employees
-			(user_id, employee_number, full_name, nik, phone, address, branch_id, department_id, position_title, job_grade)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+			(user_id, employee_number, full_name, nik, phone, address, branch_id, department_id, position_title, job_grade, birth_date)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 	`, userID, input.EmployeeNumber, input.FullName, input.NIK, input.Phone, input.Address,
-		branchID, input.DepartmentID, input.PositionTitle, input.JobGrade)
+		branchID, input.DepartmentID, input.PositionTitle, input.JobGrade, birthDate)
 	if err != nil {
 		if isUniqueViolation(err) {
 			writeError(w, http.StatusConflict, "Nomor karyawan atau NIK sudah digunakan.")
@@ -705,13 +725,13 @@ func (a *API) createEmployee(w http.ResponseWriter, r *http.Request) {
 
 func (a *API) updateEmployee(w http.ResponseWriter, r *http.Request) {
 	actor := currentPrincipal(r)
-	if !isHR(actor.Role) {
-		writeError(w, http.StatusForbidden, "Hanya HR yang dapat mengubah data karyawan.")
-		return
-	}
 	targetID, err := uuid.Parse(r.PathValue("id"))
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "ID karyawan tidak valid.")
+		return
+	}
+	if !isHR(actor.Role) && actor.ID != targetID {
+		writeError(w, http.StatusForbidden, "Anda hanya dapat memperbarui data karyawan sendiri.")
 		return
 	}
 	var input struct {
@@ -719,6 +739,8 @@ func (a *API) updateEmployee(w http.ResponseWriter, r *http.Request) {
 		Phone         *string `json:"phone"`
 		Address       *string `json:"address"`
 		JobGrade      *string `json:"job_grade"`
+		BirthDate     *string `json:"birth_date"`
+		NIK           *string `json:"nik"`
 		DepartmentID  *string `json:"department_id"`
 		PositionTitle *string `json:"position_title"`
 		BranchID      string  `json:"branch_id"`
@@ -730,6 +752,15 @@ func (a *API) updateEmployee(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	input.FullName = strings.TrimSpace(input.FullName)
+	if !isHR(actor.Role) {
+		// Karyawan hanya boleh memperbarui data kontak pribadi sendiri.
+		input.Role = ""
+		input.Active = true
+		input.BranchID = ""
+		input.ManagerID = nil
+		input.DepartmentID = nil
+		input.NIK = nil
+	}
 	if input.FullName == "" || !validManagedRole(input.Role) {
 		writeError(w, http.StatusBadRequest, "Nama dan role karyawan tidak valid.")
 		return
@@ -749,6 +780,11 @@ func (a *API) updateEmployee(w http.ResponseWriter, r *http.Request) {
 	branchID, err := uuid.Parse(input.BranchID)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "Cabang tidak valid.")
+		return
+	}
+	birthDate, err := optionalBirthDate(input.BirthDate)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "Tanggal lahir harus berformat YYYY-MM-DD dan tidak boleh di masa depan.")
 		return
 	}
 	departmentID, err := optionalUUID(input.DepartmentID)
@@ -862,10 +898,11 @@ func (a *API) updateEmployee(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if _, err := tx.Exec(r.Context(), `
-		UPDATE employees SET branch_id = $1, department_id = $2, full_name = $3,
-			phone = $4, address = $5, position_title = $6, job_grade = $7, updated_at = now()
-		WHERE user_id = $8
-	`, branchID, departmentID, input.FullName, input.Phone, input.Address, input.PositionTitle, input.JobGrade, targetID); err != nil {
+		UPDATE employees SET birth_date = $9, phone = COALESCE($4, phone), address = COALESCE($5, address),
+			branch_id = $1, department_id = $2, full_name = $3,
+			position_title = $6, job_grade = $7, nik = COALESCE($8, nik), updated_at = now()
+		WHERE user_id = $10
+	`, branchID, departmentID, input.FullName, input.Phone, input.Address, input.PositionTitle, input.JobGrade, input.NIK, birthDate, targetID); err != nil {
 		log.Printf("update employee profile failed: %v", err)
 		writeError(w, http.StatusInternalServerError, "Data karyawan tidak dapat diperbarui.")
 		return
@@ -1086,6 +1123,17 @@ func validManagedRole(role string) bool {
 	return role == "employee" || role == "manager" || role == "finance"
 }
 
+func optionalBirthDate(value *string) (*time.Time, error) {
+	if value == nil || strings.TrimSpace(*value) == "" {
+		return nil, nil
+	}
+	parsed, err := time.ParseInLocation("2006-01-02", strings.TrimSpace(*value), jakartaTime)
+	if err != nil || parsed.After(time.Now()) {
+		return nil, err
+	}
+	return &parsed, nil
+}
+
 func optionalUUID(value *string) (*uuid.UUID, error) {
 	if value == nil || strings.TrimSpace(*value) == "" {
 		return nil, nil
@@ -1157,6 +1205,32 @@ func clientIP(r *http.Request) string {
 func isUniqueViolation(err error) bool {
 	var pgErr interface{ SQLState() string }
 	return errors.As(err, &pgErr) && pgErr.SQLState() == "23505"
+}
+
+func intToString(value int) string {
+	return strconv.Itoa(value)
+}
+
+func boolToString(value bool) string {
+	if value {
+		return "true"
+	}
+	return "false"
+}
+
+func formatScore(score float64) string {
+	return strconv.FormatFloat(score, 'f', 2, 64)
+}
+
+// nextNIK menghasilkan NIK unik 16 digit otomatis: kode cabang 2 digit + tahun-bulan-hari lahir jabatan + nomor urut.
+func nextNIK(ctx context.Context, q rowQuerier) (string, error) {
+	var next int
+	if err := q.QueryRow(ctx, "SELECT COALESCE(count(*), 0)::integer + 1 FROM employees WHERE nik LIKE '90%'").Scan(&next); err != nil {
+		return "", err
+	}
+	// 90 = kode sumber sistem; 10 digit pertama menjadi basis, 6 digit terakhir nomor urut.
+	nik := "90" + time.Now().In(jakartaTime).Format("20060102") + fmt.Sprintf("%06d", next)
+	return nik, nil
 }
 
 type loginLimiter struct {

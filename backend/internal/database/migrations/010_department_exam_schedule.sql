@@ -1,0 +1,220 @@
+ALTER TABLE kpi_exam_questions ADD COLUMN division_name TEXT;
+UPDATE kpi_exam_questions SET active = FALSE WHERE division_name IS NULL;
+
+CREATE TABLE kpi_exam_schedules (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    department_id UUID NOT NULL REFERENCES departments(id),
+    title TEXT NOT NULL CHECK (length(trim(title)) BETWEEN 3 AND 150),
+    starts_at TIMESTAMPTZ NOT NULL,
+    ends_at TIMESTAMPTZ NOT NULL CHECK (ends_at > starts_at),
+    created_by UUID NOT NULL REFERENCES users(id),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (department_id)
+);
+ALTER TABLE kpi_exam_attempts ADD COLUMN schedule_id UUID REFERENCES kpi_exam_schedules(id);
+ALTER TABLE kpi_exam_attempts ADD COLUMN division_name TEXT;
+ALTER TABLE kpi_exam_attempts ADD COLUMN question_snapshot JSONB;
+CREATE INDEX idx_exam_questions_division ON kpi_exam_questions(division_name) WHERE active;
+
+-- Ten job-specific scenarios per division. Answer positions rotate across four choices.
+WITH bank(division_name, items) AS (VALUES
+('Information Technology', ARRAY[
+'Pengguna tidak bisa masuk aplikasi. Apa langkah awal?|Periksa pesan kesalahan dan status akun|Langsung hapus akun|Bagikan akun admin|Matikan audit',
+'Bagaimana memprioritaskan tiket gangguan?|Berdasarkan dampak dan urgensi|Berdasarkan warna tiket|Selalu tiket terbaru|Acak',
+'Apa indikator ketersediaan layanan?|Persentase uptime terhadap waktu layanan|Jumlah wallpaper|Banyaknya rapat|Ukuran monitor',
+'Bagaimana mengelola akses pegawai resign?|Cabut akses sesuai proses offboarding|Biarkan akun aktif|Bagikan password|Hapus seluruh server',
+'Apa bukti backup dapat dipakai?|Uji pemulihan yang berhasil|Nama file backup|Ukuran folder saja|Email pemberitahuan saja',
+'Bagaimana menangani perubahan konfigurasi produksi?|Persetujuan, pengujian, dan rencana rollback|Ubah tanpa catatan|Matikan monitoring|Bagikan kredensial',
+'Apa yang dicatat dalam inventaris TI?|Pemilik, aset, konfigurasi, dan status|Hanya warna perangkat|Hanya nama merek|Hanya tahun rapat',
+'Apa tujuan SLA layanan TI?|Menyepakati target layanan terukur|Menghapus seluruh tiket|Menjamin tanpa gangguan selamanya|Mengurangi dokumentasi',
+'Bagaimana melindungi akun penting?|Gunakan MFA dan hak akses minimum|Gunakan password bersama|Nonaktifkan log|Simpan password di grup',
+'Bagaimana menutup tiket secara profesional?|Validasi pemulihan dan dokumentasikan solusi|Tutup sebelum diuji|Hapus keluhan|Ubah nama pengguna']),
+('Infrastructure', ARRAY[
+'Kapasitas penyimpanan hampir penuh. Apa tindakan tepat?|Analisis pertumbuhan dan rencanakan kapasitas|Hapus data tanpa izin|Matikan alarm|Abaikan sampai penuh',
+'Bagaimana membuktikan pemulihan bencana?|Uji restore dan ukur RTO serta RPO|Cukup membeli disk|Cukup mengirim email|Cukup menamai backup',
+'Apa fungsi redundansi daya?|Mengurangi dampak kegagalan sumber daya|Menambah ukuran file|Menghapus log|Mengganti alamat IP',
+'Apa indikator beban CPU server?|Persentase utilisasi CPU|Warna casing|Jumlah meja|Ukuran mouse',
+'Bagaimana menerapkan patch server?|Uji, jadwalkan pemeliharaan, dan siapkan rollback|Pasang sembarang waktu|Hapus snapshot|Matikan backup',
+'Apa fungsi hypervisor?|Mengelola mesin virtual pada host|Mencetak dokumen|Membuat invoice|Mengubah gaji',
+'Apa arti RPO?|Batas kehilangan data yang dapat diterima|Durasi rapat|Jumlah server|Ukuran rak',
+'Apa arti RTO?|Target waktu pemulihan layanan|Jumlah disk|Jenis kabel|Besar anggaran',
+'Bagaimana menjaga suhu ruang server?|Pantau suhu dan sistem pendingin|Tutup semua ventilasi|Matikan sensor|Letakkan dekat air',
+'Bagaimana mengukur keberhasilan infrastruktur?|Ketersediaan, kapasitas, dan waktu pemulihan|Jumlah poster|Warna rak|Panjang nama host']),
+('Networking', ARRAY[
+'Apa fungsi DNS?|Menerjemahkan nama domain ke alamat IP|Menyimpan gaji|Mengisi baterai|Menghapus cache aplikasi',
+'Apa tujuan VLAN?|Memisahkan jaringan secara logis|Menambah RAM|Mengganti sistem operasi|Menghapus routing',
+'Bagaimana memulai diagnosis koneksi putus?|Periksa koneksi fisik dan konfigurasi IP|Langsung hapus firewall|Ganti semua server|Bagikan akses admin',
+'Apa fungsi DHCP?|Memberikan konfigurasi IP secara otomatis|Membuat backup database|Mengirim invoice|Menyimpan video',
+'Apa indikator kualitas koneksi?|Latensi, packet loss, dan throughput|Warna kabel|Harga meja|Jumlah kipas',
+'Bagaimana membatasi akses antarsegmen?|Terapkan ACL sesuai kebutuhan|Izinkan semua trafik|Matikan seluruh switch|Bagikan password Wi-Fi',
+'Apa fungsi routing?|Menentukan jalur paket antarjaringan|Mengatur brightness|Menghapus DNS|Mengisi printer',
+'Bagaimana menerapkan perubahan switch?|Backup konfigurasi dan siapkan rollback|Hapus konfigurasi dahulu|Ubah tanpa akses cadangan|Matikan log',
+'Apa fungsi VPN?|Membuat koneksi terenkripsi melalui jaringan publik|Menghapus autentikasi|Mempercepat semua aplikasi pasti|Mengganti backup',
+'Apa bukti perbaikan jaringan berhasil?|Uji konektivitas dan metrik sesudah perubahan|Tiket ditutup saja|Lampu ruangan menyala|Nama perangkat berubah']),
+('DevOps', ARRAY[
+'Apa tujuan continuous integration?|Menggabungkan perubahan dengan build dan pengujian otomatis|Deploy tanpa tes|Menghapus version control|Menyimpan password di kode',
+'Apa fungsi infrastructure as code?|Mengelola infrastruktur secara deklaratif dan terversi|Menggambar rak|Membuat surat cuti|Mengubah invoice',
+'Bagaimana menyimpan secret aplikasi?|Gunakan secret manager dan akses terbatas|Commit ke Git|Kirim ke grup umum|Tulis di image publik',
+'Deployment gagal. Apa tindakan tepat?|Evaluasi kesehatan dan jalankan rollback terencana|Hapus semua log|Ulang tanpa analisis|Matikan backup',
+'Apa tujuan readiness probe?|Memastikan instance siap menerima trafik|Menghitung tagihan|Menghapus container|Mengubah email',
+'Apa indikator keandalan deployment?|Change failure rate dan waktu pemulihan|Jumlah emoji commit|Warna terminal|Jumlah wallpaper',
+'Bagaimana mengurangi risiko rilis?|Gunakan canary atau blue-green dengan observasi|Rilis semua tanpa monitoring|Hapus staging|Nonaktifkan alarm',
+'Apa fungsi registry container?|Menyimpan dan mendistribusikan image terversi|Membuat payroll|Mengganti DNS global|Menyimpan meja',
+'Apa tujuan observability?|Memahami kondisi sistem melalui log, metrik, dan trace|Menghapus catatan gangguan|Mengganti semua server|Membatasi dokumentasi',
+'Bagaimana menjaga pipeline andal?|Uji otomatis, kontrol akses, dan artefak terversi|Bagikan token admin|Lewati semua tes|Gunakan latest tanpa kontrol']),
+('Programmer', ARRAY[
+'Apa manfaat unit test?|Menguji perilaku unit kode secara terisolasi|Mengganti seluruh dokumentasi|Menjamin semua bug hilang|Menghapus kebutuhan review',
+'Bagaimana mencegah SQL injection?|Gunakan query berparameter|Gabungkan input ke SQL|Sembunyikan tombol|Ubah nama tabel',
+'Apa tujuan code review?|Meningkatkan kualitas dan mendeteksi risiko perubahan|Menambah jumlah baris|Menghapus testing|Mengganti rapat HR',
+'Bagaimana menangani bug produksi?|Reproduksi, perbaiki akar masalah, dan uji regresi|Ubah acak|Hapus log|Salahkan pengguna',
+'Apa arti HTTP 401?|Autentikasi diperlukan atau tidak valid|Berhasil dibuat|Server selalu mati|Data sudah dihapus',
+'Apa tujuan validasi sisi server?|Menegakkan aturan untuk semua permintaan|Mengganti CSS|Menyembunyikan form|Mempercepat monitor',
+'Bagaimana mengelola perubahan kode?|Gunakan version control dan commit bermakna|Timpa file tanpa riwayat|Kirim zip saja|Edit langsung tanpa backup',
+'Apa risiko race condition?|Hasil salah akibat akses bersamaan tanpa koordinasi|Font berubah|Monitor redup|Keyboard macet',
+'Bagaimana melindungi password?|Simpan hash adaptif dengan salt|Simpan plaintext|Gunakan Base64 saja|Kirim melalui URL',
+'Apa ukuran kualitas fitur?|Kesesuaian kebutuhan dan hasil pengujian|Jumlah baris saja|Lama mengetik|Banyaknya komentar saja']),
+('IT Security', ARRAY[
+'Apa prinsip least privilege?|Memberikan akses minimum sesuai kebutuhan|Semua mendapat admin|Password bersama|Akses tanpa batas waktu',
+'Apa langkah awal dugaan insiden keamanan?|Validasi dan lakukan containment sesuai prosedur|Hapus seluruh bukti|Publikasikan kredensial|Abaikan alarm',
+'Bagaimana menghadapi email phishing?|Jangan buka tautan dan laporkan ke tim keamanan|Kirim password|Teruskan ke semua orang|Nonaktifkan antivirus',
+'Apa fungsi MFA?|Menambah faktor autentikasi independen|Menghapus password hash|Membuka semua firewall|Mengganti backup',
+'Apa tujuan audit log?|Menyediakan jejak aktivitas untuk investigasi|Menyimpan password plaintext|Menghapus bukti|Meningkatkan resolusi layar',
+'Bagaimana memprioritaskan kerentanan?|Nilai dampak, kemungkinan eksploitasi, dan paparan|Urut warna|Abaikan aset penting|Pilih acak',
+'Apa tujuan enkripsi data sensitif?|Melindungi kerahasiaan data|Menghilangkan semua risiko|Mengganti kontrol akses|Menghapus backup',
+'Apa praktik pengelolaan secret?|Rotasi dan batasi akses melalui penyimpanan aman|Commit token publik|Bagikan via chat umum|Gunakan satu token selamanya',
+'Apa tujuan simulasi pemulihan insiden?|Memvalidasi kesiapan dan memperbaiki prosedur|Mencari kambing hitam|Menghapus tim|Menambah aplikasi acak',
+'Apa indikator perbaikan keamanan?|Penurunan risiko dan waktu deteksi serta respons|Jumlah slide|Jumlah poster|Warna badge']),
+('Technician', ARRAY[
+'Apa langkah awal perbaikan perangkat?|Catat gejala dan lakukan diagnosis aman|Bongkar tanpa izin|Buang perangkat|Hapus semua data',
+'Bagaimana mencegah kerusakan akibat listrik statis?|Gunakan perlindungan ESD|Pegang komponen sembarang|Kerjakan di area basah|Lepas grounding',
+'Apa tujuan pemeliharaan berkala?|Mencegah gangguan dan memperpanjang usia aset|Menghapus inventaris|Mengganti semua aset|Menambah kerusakan',
+'Bagaimana menangani suku cadang?|Catat penggunaan dan stok|Ambil tanpa catatan|Campur barang rusak|Buang bukti pembelian',
+'Apa bukti servis selesai?|Uji fungsi dan konfirmasi pengguna|Sekadar bersihkan casing|Tutup tiket segera|Ubah label aset',
+'Apa tindakan sebelum membuka perangkat listrik?|Putuskan sumber daya sesuai prosedur|Biarkan menyala|Basahi komponen|Abaikan petunjuk',
+'Bagaimana mengukur keberhasilan perbaikan?|First-time fix rate dan waktu perbaikan|Panjang obeng|Jumlah stiker|Warna seragam',
+'Bagaimana menangani data pengguna saat servis?|Jaga kerahasiaan dan akses sesuai izin|Salin untuk pribadi|Sebarkan foto|Hapus tanpa persetujuan',
+'Apa isi laporan servis?|Gejala, tindakan, komponen, dan hasil uji|Hanya nama teknisi|Hanya harga alat|Hanya waktu istirahat',
+'Kerusakan di luar kewenangan. Apa tindakan tepat?|Eskalasi ke pihak berwenang|Coba berbahaya|Sembunyikan kerusakan|Abaikan pelanggan']),
+('Accounting', ARRAY[
+'Apa prinsip dasar persamaan akuntansi?|Aset sama dengan liabilitas ditambah ekuitas|Aset sama dengan pendapatan saja|Ekuitas selalu nol|Utang sama dengan kas',
+'Apa tujuan rekonsiliasi bank?|Mencocokkan catatan kas dengan rekening bank|Membuat password|Menyetujui cuti|Menghapus transaksi',
+'Bagaimana mencatat transaksi?|Berdasarkan bukti valid dan akun yang tepat|Berdasarkan ingatan|Tanpa tanggal|Gabungkan tanpa bukti',
+'Apa tujuan pemisahan tugas?|Mengurangi risiko kesalahan dan kecurangan|Memperlambat semua kerja|Menghilangkan audit|Membagikan otorisasi',
+'Bagaimana memperbaiki salah pencatatan?|Gunakan jurnal koreksi dengan jejak audit|Hapus bukti|Ubah diam-diam|Abaikan selisih',
+'Apa arti basis akrual?|Mengakui transaksi saat hak atau kewajiban timbul|Hanya saat kas diterima|Hanya akhir tahun|Hanya transaksi tunai',
+'Apa tujuan aging piutang?|Mengelompokkan piutang menurut umur|Mengubah umur pegawai|Menghapus invoice|Menghitung stok kursi',
+'Bagaimana menyiapkan tutup buku?|Rekonsiliasi, penyesuaian, dan review saldo|Hapus transaksi|Lewati review|Tunda semua pencatatan',
+'Apa indikator mutu laporan keuangan?|Akurat dan selesai sesuai tenggat|Jumlah warna|Banyaknya halaman saja|Ukuran font',
+'Invoice tanpa bukti penerimaan. Apa tindakan tepat?|Verifikasi dokumen pendukung sebelum proses|Langsung bayar|Hapus invoice|Gandakan pembayaran']),
+('Tax', ARRAY[
+'Apa dasar menghitung kewajiban pajak?|Peraturan berlaku dan dokumen transaksi valid|Perkiraan tanpa bukti|Pendapat acak|Nilai tahun lalu saja',
+'Apa tujuan rekonsiliasi fiskal?|Menyesuaikan laba komersial dengan ketentuan pajak|Menghapus pendapatan|Mengubah bank|Menutup divisi',
+'Bagaimana menjaga kepatuhan pelaporan?|Pantau tenggat dan validasi data pelaporan|Tunggu teguran|Abaikan perubahan aturan|Gunakan data acak',
+'Apa yang diperiksa pada faktur pajak?|Identitas, nilai transaksi, dan validitas faktur|Warna kertas saja|Ukuran logo|Nama kurir',
+'Bagaimana menghadapi kesalahan SPT?|Verifikasi dan lakukan pembetulan sesuai aturan|Hapus bukti|Abaikan|Ubah dokumen sumber sembarang',
+'Apa tujuan arsip pajak?|Menyediakan bukti yang dapat ditelusuri|Memenuhi meja|Menghapus audit|Mengganti pembayaran',
+'Bagaimana memperlakukan transaksi kena pajak?|Tentukan objek dan tarif sesuai aturan berlaku|Pakai satu tarif untuk semua|Abaikan jenis transaksi|Ikuti rumor',
+'Apa indikator kinerja perpajakan?|Ketepatan waktu dan akurasi kepatuhan|Jumlah folder|Banyak email saja|Ukuran kalkulator',
+'Apa tindakan ketika aturan berubah?|Evaluasi dampak dan perbarui proses|Abaikan|Hapus sistem|Berhenti mencatat',
+'Selisih data pajak dan akuntansi. Apa tindakan tepat?|Rekonsiliasi dan dokumentasikan penyebab|Samakan paksa|Hapus selisih|Tunda tanpa batas']),
+('Purchasing', ARRAY[
+'Apa dasar memilih pemasok?|Harga, mutu, waktu, dan kepatuhan|Hadiah pribadi|Hubungan pribadi saja|Pilihan acak',
+'Apa tujuan purchase order?|Mendokumentasikan pemesanan yang disetujui|Mengganti slip gaji|Menghapus utang|Menambah user',
+'Apa yang dimaksud three-way matching?|Mencocokkan PO, penerimaan, dan invoice|Mencocokkan tiga warna|Menghapus tiga dokumen|Membeli tiga barang',
+'Bagaimana menangani benturan kepentingan?|Ungkapkan dan ikuti prosedur perusahaan|Sembunyikan|Terima hadiah|Pilih keluarga otomatis',
+'Apa indikator kinerja pemasok?|Ketepatan pengiriman dan mutu barang|Jumlah iklan|Warna merek|Jumlah followers saja',
+'Bagaimana mengelola permintaan mendesak?|Verifikasi urgensi dan gunakan alur persetujuan|Beli tanpa catatan|Lewati semua kontrol|Gandakan pesanan',
+'Apa tujuan perbandingan penawaran?|Menilai biaya dan manfaat secara transparan|Mencari hadiah|Menghapus pesaing|Menunda pembelian',
+'Apa yang diperiksa sebelum menerima barang?|Kesesuaian spesifikasi, jumlah, dan kondisi|Warna seragam kurir|Ukuran kendaraan|Nama jalan',
+'Apa arti lead time pengadaan?|Waktu dari pemesanan hingga penerimaan|Durasi istirahat|Umur aset|Jumlah pemasok',
+'Bagaimana mengukur penghematan?|Bandingkan biaya dengan baseline yang sah|Gunakan angka tanpa bukti|Hitung diskon saja tanpa mutu|Abaikan total biaya']),
+('Project Administration', ARRAY[
+'Apa tujuan document control proyek?|Menjaga versi dan keterlacakan dokumen|Menghapus revisi|Membagikan semua akses|Menambah duplikasi',
+'Apa isi notulen rapat proyek?|Keputusan, penanggung jawab, dan tenggat|Hanya daftar makanan|Hanya judul|Hanya foto ruangan',
+'Bagaimana memantau tenggat dokumen?|Gunakan daftar deliverable dan pengingat|Mengandalkan ingatan|Tunggu komplain|Hapus tenggat',
+'Apa tujuan change request?|Mencatat dan menyetujui perubahan lingkup|Menghapus kontrak|Menambah pekerjaan tanpa izin|Mengubah invoice diam-diam',
+'Bagaimana mengelola versi berkas?|Gunakan nomor revisi dan repositori resmi|Timpa tanpa riwayat|Kirim file final acak|Simpan pribadi saja',
+'Apa bukti serah terima proyek?|Berita acara yang diverifikasi dan disetujui|Pesan informal saja|Foto tanpa konteks|Nama folder',
+'Apa tujuan daftar risiko proyek?|Melacak risiko dan tindakan mitigasi|Mencatat cuti saja|Menghapus masalah|Mengganti kontrak',
+'Bagaimana menjaga kerahasiaan kontrak?|Batasi akses sesuai kewenangan|Unggah publik|Kirim ke semua grup|Cetak sembarang',
+'Apa indikator administrasi proyek?|Kelengkapan dan ketepatan waktu dokumen|Jumlah stiker|Ukuran binder|Warna map',
+'Dokumen persetujuan belum lengkap. Apa tindakan tepat?|Tindak lanjuti penanggung jawab sebelum finalisasi|Palsukan tanda tangan|Abaikan|Hapus persyaratan']),
+('B2B Sales', ARRAY[
+'Apa langkah awal penjualan B2B?|Pahami kebutuhan dan proses pembelian perusahaan|Kirim harga acak|Janjikan semua hal|Abaikan pengambil keputusan',
+'Apa tujuan qualification prospek?|Menilai kebutuhan, anggaran, otoritas, dan waktu|Menambah kontak palsu|Menghapus CRM|Menjual tanpa analisis',
+'Bagaimana mengukur pipeline berkualitas?|Peluang terverifikasi dan tahap yang jelas|Jumlah kartu nama saja|Jumlah pesan massal|Jumlah likes',
+'Apa isi proposal B2B yang baik?|Solusi, manfaat, ruang lingkup, dan biaya|Hanya logo|Hanya harga|Janji tanpa batas',
+'Bagaimana menangani keberatan pelanggan?|Gali alasan dan berikan solusi relevan|Memaksa|Menghina pesaing|Mengabaikan pertanyaan',
+'Apa tujuan pencatatan CRM?|Melacak interaksi dan tindak lanjut|Mengganti kontrak|Menyimpan password pelanggan|Menghapus data',
+'Apa indikator closing penjualan?|Kontrak atau pesanan sah sesuai prosedur|Janji lisan tanpa bukti|Pesan dibaca|Jumlah meeting',
+'Bagaimana menjaga margin?|Diskon sesuai otorisasi dan nilai solusi|Diskon tanpa batas|Abaikan biaya|Janji gratis selamanya',
+'Apa tujuan account management?|Menjaga hubungan dan pertumbuhan akun|Hanya cari akun baru|Hapus keluhan|Abaikan layanan',
+'Bagaimana membuat forecast?|Gunakan data peluang dan probabilitas realistis|Tebak angka|Gandakan target|Abaikan pipeline']),
+('SMB Sales', ARRAY[
+'Bagaimana memahami kebutuhan usaha kecil?|Tanyakan masalah operasional dan anggaran|Jual paket terbesar saja|Abaikan kebutuhan|Kirim kontrak kosong',
+'Apa prioritas solusi untuk SMB?|Nilai praktis sesuai kebutuhan dan kemampuan bayar|Fitur terbanyak selalu|Biaya tersembunyi|Kompleksitas maksimum',
+'Apa tujuan follow-up prospek?|Membantu keputusan melalui langkah berikutnya yang jelas|Mengirim spam|Menekan tanpa konteks|Menghapus kontak',
+'Apa indikator konversi?|Persentase prospek menjadi pelanggan|Jumlah poster|Jumlah telepon saja|Ukuran kantor',
+'Bagaimana menjelaskan harga?|Transparan tentang biaya dan cakupan|Sembunyikan biaya|Ubah setelah tanda tangan|Janji tanpa rincian',
+'Apa tujuan onboarding pelanggan SMB?|Memastikan pelanggan mulai memakai solusi dengan baik|Menutup akun|Menghapus dukungan|Mengganti kontrak',
+'Apa arti churn pelanggan?|Pelanggan berhenti berlangganan|Pelanggan baru|Jumlah produk|Jumlah email',
+'Bagaimana mengelola banyak prospek?|Prioritaskan dan catat tindak lanjut di CRM|Mengandalkan ingatan|Kontak acak|Hapus data lama sembarang',
+'Bagaimana menanggapi keluhan pelanggan?|Catat dan koordinasikan penyelesaian|Abaikan|Janji palsu|Salahkan pelanggan',
+'Apa indikator keberhasilan SMB Sales?|Konversi, retensi, dan pendapatan sehat|Jumlah brosur saja|Jumlah emoji|Warna kartu nama']),
+('Sales Management', ARRAY[
+'Apa dasar penetapan target tim sales?|Potensi pasar, kapasitas, dan data historis|Angka acak|Target pesaing saja|Jumlah meja',
+'Apa tujuan coaching sales?|Meningkatkan keterampilan dan pencapaian tim|Mencari kesalahan saja|Menghapus pelatihan|Mengganti semua anggota',
+'Bagaimana meninjau forecast?|Validasi pipeline dan asumsi peluang|Terima semua angka|Gandakan proyeksi|Abaikan data',
+'Apa indikator kesehatan pipeline?|Cakupan, tahap, umur, dan kualitas peluang|Warna grafik|Jumlah slide|Jumlah grup chat',
+'Bagaimana mengendalikan diskon?|Gunakan batas otorisasi dan evaluasi margin|Bebaskan semua diskon|Abaikan laba|Hapus persetujuan',
+'Apa tujuan segmentasi pelanggan?|Menyesuaikan strategi dengan kebutuhan segmen|Membedakan warna kartu|Menghapus akun kecil|Menyembunyikan harga',
+'Bagaimana menangani kinerja tim rendah?|Analisis penyebab dan buat rencana perbaikan|Hukum tanpa evaluasi|Abaikan hambatan|Ubah data',
+'Apa arti win rate?|Persentase peluang yang berhasil dimenangkan|Jumlah rapat|Jumlah prospek mentah|Jumlah kartu nama',
+'Bagaimana menjaga etika penjualan?|Pastikan janji dan kontrak sesuai kemampuan layanan|Janji apa pun|Sembunyikan syarat|Bagikan data pelanggan',
+'Apa dasar evaluasi kinerja sales?|Pencapaian, proses, dan kualitas hubungan pelanggan|Kedekatan pribadi|Jumlah online saja|Pilihan acak']),
+('IT Management', ARRAY[
+'Apa tujuan strategi TI?|Menyelaraskan teknologi dengan tujuan bisnis|Membeli semua alat baru|Menghapus anggaran|Mengganti semua pegawai',
+'Bagaimana memprioritaskan investasi TI?|Nilai manfaat, biaya, risiko, dan kebutuhan bisnis|Pilih merek mahal|Ikuti tren saja|Pilih acak',
+'Apa tujuan tata kelola TI?|Menetapkan tanggung jawab dan pengendalian keputusan|Menghapus audit|Membebaskan semua akses|Menghilangkan dokumentasi',
+'Bagaimana mengelola risiko TI?|Identifikasi, nilai, dan mitigasi risiko|Abaikan hingga insiden|Sembunyikan laporan|Hapus log',
+'Apa indikator layanan TI?|SLA, kepuasan pengguna, dan keandalan|Jumlah alat saja|Harga monitor|Jumlah rapat',
+'Bagaimana memilih vendor TI?|Evaluasi kemampuan, biaya total, keamanan, dan SLA|Hadiah terbesar|Merek saja|Hubungan pribadi saja',
+'Apa tujuan business continuity plan?|Menjaga layanan penting saat gangguan|Menghapus backup|Mengurangi keamanan|Mengganti kontrak',
+'Bagaimana menangani insiden besar?|Koordinasikan respons dan komunikasi terstruktur|Diam sampai selesai|Hapus bukti|Salahkan tim',
+'Apa tujuan pengembangan tim TI?|Menutup kesenjangan kompetensi sesuai kebutuhan|Menambah rapat|Menghapus cuti|Mengurangi dokumentasi',
+'Bagaimana mengevaluasi proyek TI?|Ukur manfaat, mutu, biaya, dan ketepatan waktu|Jumlah slide saja|Jumlah chat|Warna aplikasi']),
+('Messenger', ARRAY[
+'Apa yang diperiksa sebelum mengirim dokumen?|Alamat, penerima, dan kelengkapan dokumen|Warna amplop saja|Nama kendaraan|Cuaca saja',
+'Apa bukti pengiriman yang sah?|Tanda terima atau konfirmasi penerima|Pesan pribadi tanpa detail|Foto jalan saja|Cerita lisan saja',
+'Bagaimana menjaga dokumen rahasia?|Simpan tertutup dan serahkan ke pihak berwenang|Buka dan salin|Sebarkan foto|Tinggalkan sembarang',
+'Apa tindakan bila alamat penerima salah?|Konfirmasi ke penanggung jawab|Tebak alamat|Buang paket|Titip tanpa izin',
+'Bagaimana merencanakan rute?|Susun berdasarkan prioritas, lokasi, dan tenggat|Acak|Pilih terjauh selalu|Abaikan waktu',
+'Dokumen gagal diserahkan. Apa tindakan tepat?|Catat alasan dan koordinasikan tindak lanjut|Tandai terkirim|Sembunyikan|Hapus catatan',
+'Apa prioritas saat berkendara?|Keselamatan dan kepatuhan lalu lintas|Kecepatan tanpa batas|Menggunakan ponsel|Melawan arus',
+'Bagaimana mengelola uang operasional?|Catat penggunaan dan simpan bukti|Campur dana pribadi|Buang struk|Ubah nominal',
+'Apa indikator kinerja kurir internal?|Ketepatan waktu dan akurasi serah terima|Kecepatan saja|Jumlah klakson|Warna helm',
+'Paket rusak saat diterima. Apa tindakan tepat?|Dokumentasikan dan laporkan kondisi|Sembunyikan|Tandatangani tanpa catatan|Buang bukti']),
+('Office Boy', ARRAY[
+'Apa prioritas kebersihan area kerja?|Area higienis dan aman sesuai jadwal|Wangi saja|Warna lantai|Jumlah alat',
+'Bagaimana menggunakan bahan pembersih?|Ikuti label dan prosedur keselamatan|Campur semua bahan|Gunakan tanpa pengenceran|Simpan di botol minum',
+'Lantai sedang dipel. Apa tindakan tepat?|Pasang tanda lantai basah|Biarkan tanpa tanda|Tutup lampu|Abaikan pengguna',
+'Bagaimana menangani sampah?|Pisahkan sesuai jenis dan prosedur|Campur bahan berbahaya|Buang ke saluran|Tumpuk dekat makanan',
+'Apa yang dilakukan sebelum rapat?|Periksa kebersihan dan kesiapan ruang|Tunggu keluhan|Kunci ruangan|Pindahkan dokumen rahasia',
+'Bagaimana mengelola stok kebutuhan kantor?|Catat pemakaian dan ajukan sebelum habis|Tunggu habis total|Ambil tanpa catatan|Buang persediaan',
+'Menemukan barang tertinggal. Apa tindakan tepat?|Laporkan dan serahkan sesuai prosedur|Simpan pribadi|Buang|Berikan ke orang acak',
+'Bagaimana menjaga kebersihan pantry?|Bersihkan peralatan dan pisahkan bahan makanan|Campur bahan kimia|Biarkan sisa makanan|Gunakan lap toilet',
+'Apa indikator kinerja kebersihan?|Kepatuhan jadwal dan hasil inspeksi|Jumlah pewangi saja|Lama istirahat|Warna seragam',
+'Ada bahaya listrik saat membersihkan. Apa tindakan tepat?|Hentikan pekerjaan dan laporkan ke petugas|Sentuh kabel|Siram air|Abaikan bahaya'])
+), expanded AS (
+ SELECT division_name, item, ord::integer AS ord FROM bank CROSS JOIN LATERAL unnest(items) WITH ORDINALITY AS x(item,ord)
+), parts AS (
+ SELECT division_name, string_to_array(item,'|') AS p, (ord-1)%4 AS correct FROM expanded
+)
+INSERT INTO kpi_exam_questions(division_name, question, options, correct_index)
+SELECT division_name, p[1],
+ CASE correct
+ WHEN 0 THEN jsonb_build_array(p[2],p[3],p[4],p[5])
+ WHEN 1 THEN jsonb_build_array(p[3],p[2],p[4],p[5])
+ WHEN 2 THEN jsonb_build_array(p[3],p[4],p[2],p[5])
+ ELSE jsonb_build_array(p[3],p[4],p[5],p[2]) END, correct
+FROM parts;

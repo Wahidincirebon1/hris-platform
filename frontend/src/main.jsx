@@ -1,44 +1,15 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import './style.css';
-
-function canUseSelfService(role) {
-  return ['employee', 'manager', 'hr'].includes(role);
-}
-
-async function api(path, options = {}) {
-  const controller = new AbortController();
-  const timeout = window.setTimeout(() => controller.abort(), 20000);
-  try {
-    const response = await fetch(path, {
-      credentials: 'same-origin',
-      ...options,
-      signal: options.signal || controller.signal,
-      headers: {
-        ...(options.body ? { 'Content-Type': 'application/json' } : {}),
-        ...options.headers,
-      },
-    });
-    const body = await response.json().catch(() => ({}));
-    if (!response.ok) {
-      throw new Error(body.error || `Permintaan gagal (${response.status}).`);
-    }
-    return body;
-  } catch (error) {
-    if (error.name === 'AbortError') {
-      throw new Error('Server tidak merespons dalam 20 detik. Periksa koneksi lalu coba lagi.');
-    }
-    throw error;
-  } finally {
-    window.clearTimeout(timeout);
-  }
-}
+import { ExamResultPanel, ExamScheduleEditor, KPIExam, KPIExamResults } from './exam-panels.jsx';
+import { api, canUseSelfService, formatWib, jakartaDate, shiftDate, timeInputWib } from './shared.js';
 
 const emptyEmployee = {
   email: '',
   temporary_password: '',
   employee_number: '',
   full_name: '',
+  birth_date: '',
   nik: '',
   phone: '',
   address: '',
@@ -247,6 +218,7 @@ function EmployeeProvisioning({ branches, branchID, employees, onCreated, isSupe
     try {
       const payload = {
         ...form,
+        birth_date: form.birth_date || null,
         nik: form.nik || null,
         phone: form.phone || null,
         address: form.address || null,
@@ -278,30 +250,26 @@ function EmployeeProvisioning({ branches, branchID, employees, onCreated, isSupe
       {notice && <div className="alert success" role="status">{notice}</div>}
       <form className="employee-form" onSubmit={submit}>
         <label>Nama lengkap<input value={form.full_name} onChange={(event) => update('full_name', event.target.value)} required maxLength={150} /></label>
+        <label>Tanggal lahir<input type="date" value={form.birth_date} onChange={(event) => update('birth_date', event.target.value)} max={jakartaDate()} /></label>
+        <label>NIK (16 digit) — dibiarkan kosong untuk dibuat otomatis<input value={form.nik} onChange={(event) => update('nik', event.target.value)} maxLength={64} placeholder="Otomatis" /></label>
+        <label>Divisi / departemen
+          <select value={form.department_id} onChange={(event) => update('department_id', event.target.value)}>
+            <option value="">Belum ditentukan</option>
+            {departments.map((department) => <option key={department.id} value={department.id}>{department.name}</option>)}
+          </select>
+        </label>
+        <label>Grade pekerjaan<input value={form.job_grade} onChange={(event) => update('job_grade', event.target.value)} maxLength={80} placeholder="Contoh: G5 / Senior" /></label>
+        <label>Posisi / jabatan<input value={form.position_title} onChange={(event) => update('position_title', event.target.value)} maxLength={100} /></label>
         <label>Email kerja<input type="email" autoComplete="email" value={form.email} onChange={(event) => update('email', event.target.value)} required /></label>
-        <label>Nomor karyawan<input value={form.employee_number} onChange={(event) => update('employee_number', event.target.value)} required maxLength={64} /></label>
-        <label>NIK (opsional)<input value={form.nik} onChange={(event) => update('nik', event.target.value)} maxLength={64} /></label>
+        <label>Nomor telepon<input type="tel" autoComplete="tel" value={form.phone} onChange={(event) => update('phone', event.target.value)} maxLength={40} /></label>
+        <label>Alamat<input value={form.address} onChange={(event) => update('address', event.target.value)} maxLength={500} /></label>
         <label>Cabang
           <select value={form.branch_id} onChange={(event) => update('branch_id', event.target.value)} required>
             <option value="">Pilih cabang</option>
             {branches.map((branch) => <option key={branch.id} value={branch.id}>{branch.name}</option>)}
           </select>
         </label>
-        <label>Departemen
-          <select value={form.department_id} onChange={(event) => update('department_id', event.target.value)}>
-            <option value="">Belum ditentukan</option>
-            {departments.map((department) => <option key={department.id} value={department.id}>{department.name}</option>)}
-          </select>
-        </label>
-        <label>Jabatan<input value={form.position_title} onChange={(event) => update('position_title', event.target.value)} maxLength={100} /></label>
-        <label>Grade pekerjaan<input value={form.job_grade} onChange={(event) => update('job_grade', event.target.value)} maxLength={80} placeholder="Contoh: G5 / Senior" /></label>
-        <label>Atasan langsung
-          <select value={form.manager_id} onChange={(event) => update('manager_id', event.target.value)}>
-            <option value="">Belum ditentukan</option>
-            {managers.map((manager) => <option key={manager.user_id} value={manager.user_id}>{manager.full_name}</option>)}
-          </select>
-        </label>
-        <label>Role
+        <label>Status kepegawaian (role akses)
           <select value={form.role} onChange={(event) => update('role', event.target.value)}>
             <option value="employee">Karyawan</option>
             <option value="manager">Atasan / manajer</option>
@@ -309,50 +277,20 @@ function EmployeeProvisioning({ branches, branchID, employees, onCreated, isSupe
             {isSuperadmin && <option value="hr">HR</option>}
           </select>
         </label>
-        <label>Nomor telepon (opsional)<input type="tel" autoComplete="tel" value={form.phone} onChange={(event) => update('phone', event.target.value)} maxLength={40} /></label>
+        <label>Atasan langsung
+          <select value={form.manager_id} onChange={(event) => update('manager_id', event.target.value)}>
+            <option value="">Belum ditentukan</option>
+            {managers.map((manager) => <option key={manager.user_id} value={manager.user_id}>{manager.full_name}</option>)}
+          </select>
+        </label>
+        <label>Nomor karyawan<input value={form.employee_number} onChange={(event) => update('employee_number', event.target.value)} required maxLength={64} /></label>
         <label>Password sementara<input type="password" autoComplete="new-password" value={form.temporary_password} onChange={(event) => update('temporary_password', event.target.value)} minLength={12} required /></label>
-        <label>Alamat (opsional)<input value={form.address} onChange={(event) => update('address', event.target.value)} maxLength={500} /></label>
         <div className="form-actions">
           <button className="primary" disabled={busy}>{busy ? 'Membuat akun...' : 'Buat akun'}</button>
         </div>
       </form>
     </section>
   );
-}
-
-function jakartaDate(value = new Date()) {
-  const parts = new Intl.DateTimeFormat('en-US', {
-    timeZone: 'Asia/Jakarta',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).formatToParts(value);
-  const fields = Object.fromEntries(parts.map((part) => [part.type, part.value]));
-  return `${fields.year}-${fields.month}-${fields.day}`;
-}
-
-function shiftDate(value, days) {
-  const date = new Date(`${value}T00:00:00Z`);
-  date.setUTCDate(date.getUTCDate() + days);
-  return date.toISOString().slice(0, 10);
-}
-
-function formatWib(value, options = {}) {
-  if (!value) return '—';
-  return new Intl.DateTimeFormat('id-ID', {
-    timeZone: 'Asia/Jakarta',
-    ...options,
-  }).format(new Date(value));
-}
-
-function timeInputWib(value) {
-  if (!value) return '';
-  return new Intl.DateTimeFormat('en-GB', {
-    timeZone: 'Asia/Jakarta',
-    hour: '2-digit',
-    minute: '2-digit',
-    hourCycle: 'h23',
-  }).format(new Date(value));
 }
 
 function AttendancePanel() {
@@ -625,7 +563,7 @@ function EmployeeProfile({ profilePath, photoPath, canUpload, onClose }) {
       </div>
       {error && <div className="alert error" role="alert">{error}</div>}
       {notice && <div className="alert success" role="status">{notice}</div>}
-      {!profile ? <p className="muted">Memuat profil…</p> : (
+      {!profile ? <p className="muted">{error ? 'Profil belum berhasil dimuat.' : 'Memuat profil…'} <button type="button" className="secondary compact" onClick={loadProfile}>Muat ulang profil</button></p> : (
         <>
           <div className="employee-profile-header">
             <div className="employee-avatar">
@@ -648,23 +586,25 @@ function EmployeeProfile({ profilePath, photoPath, canUpload, onClose }) {
                   setFile(selected);
                 }} />
               </label>
-              <button className="secondary compact" disabled={busy || !file}>{busy ? 'Memproses foto…' : 'Unggah foto profil'}</button>
+              <button className="primary" disabled={busy}>{busy ? 'Memproses foto…' : 'Simpan foto profil'}</button>
               <span className="muted">Foto akan dipotong persegi di tengah dan disimpan 512 × 512 px.</span>
             </form>
           )}
           <div className="profile-grid employee-profile-grid">
+            <div><span>Nama lengkap</span><strong>{profile.full_name}</strong></div>
+            <div><span>Tanggal lahir</span><strong>{profile.birth_date ? formatWib(`${profile.birth_date}T00:00:00+07:00`, { dateStyle: 'long' }) : 'Belum diisi'}</strong></div>
+            <div><span>NIK</span><strong>{profile.nik || 'Belum diisi'}</strong></div>
+            <div><span>Divisi</span><strong>{profile.department || 'Belum ditentukan'}</strong></div>
+            <div><span>Grade</span><strong>{profile.job_grade || 'Belum ditentukan'}</strong></div>
+            <div><span>Posisi / jabatan</span><strong>{profile.position_title || 'Belum ditentukan'}</strong></div>
             <div><span>Email</span><strong>{profile.email}</strong></div>
             <div><span>Nomor telepon</span><strong>{profile.phone || 'Belum diisi'}</strong></div>
-            <div><span>NIK</span><strong>{profile.nik || 'Belum diisi'}</strong></div>
             <div><span>Alamat</span><strong>{profile.address || 'Belum diisi'}</strong></div>
-            <div><span>Divisi</span><strong>{profile.department || 'Belum ditentukan'}</strong></div>
-            <div><span>Jabatan / pekerjaan</span><strong>{profile.position_title || 'Belum ditentukan'}</strong></div>
-            <div><span>Grade</span><strong>{profile.job_grade || 'Belum ditentukan'}</strong></div>
-            <div><span>Role akses</span><strong>{profile.role}</strong></div>
-            <div><span>Atasan langsung</span><strong>{profile.manager_name || 'Belum ditetapkan'}</strong></div>
-            <div><span>Tanggal mulai kerja</span><strong>{profile.hired_on || 'Belum diisi'}</strong></div>
             <div><span>Status karyawan</span><strong>{profile.employment_status}</strong></div>
             <div><span>Cabang</span><strong>{profile.branch_name}</strong></div>
+            <div><span>Atasan langsung</span><strong>{profile.manager_name || 'Belum ditetapkan'}</strong></div>
+            <div><span>Role akses</span><strong>{profile.role}</strong></div>
+            <div><span>Tanggal mulai kerja</span><strong>{profile.hired_on || 'Belum diisi'}</strong></div>
           </div>
           <p className="muted profile-privacy-note">Informasi pribadi hanya ditampilkan kepada pemilik profil dan HR berwenang.</p>
         </>
@@ -1548,6 +1488,7 @@ function KPIWorkspace({ user, employees, branches, branchID, onBranchChange, vie
   );
 }
 
+
 function AttendanceSettings() {
   const [settings, setSettings] = useState(null);
   const [schedule, setSchedule] = useState(null);
@@ -1838,36 +1779,38 @@ function Dashboard({ user, onLogout }) {
   const [busy, setBusy] = useState(true);
 
   const adminPages = [
-    { path: '/home', label: 'Ringkasan', eyebrow: 'IKHTISAR ORGANISASI' },
-    ...(user.role === 'hr' ? [
-      { path: '/admin/my-attendance', label: 'Absensi saya', eyebrow: 'KEHADIRAN PRIBADI' },
-      { path: '/admin/requests', label: 'Izin & lembur saya', eyebrow: 'LAYANAN MANDIRI' },
-      { path: '/admin/profile', label: 'Profil saya', eyebrow: 'DATA PRIBADI' },
-    ] : []),
-    ...(user.role === 'superadmin' ? [
-      { path: '/admin/requests', label: 'Persetujuan izin & lembur', eyebrow: 'ANTREAN PERSONAL HR' },
-    ] : []),
-    { path: '/admin/leave', label: user.role === 'hr' ? 'Cuti saya & kalender kantor' : 'Hak tahunan & kalender kantor', eyebrow: 'CUTI & KALENDER' },
-    { path: '/admin/performance', label: 'KPI & tinjauan kinerja', eyebrow: 'KINERJA TAHUNAN' },
-    { path: '/admin/approvals', label: 'Persetujuan target, hasil, dan keberatan', eyebrow: 'ANTREAN TINJAUAN' },
-    { path: '/admin/attendance', label: 'Absensi dan keterlambatan', eyebrow: 'KEHADIRAN' },
-    { path: '/admin/schedule', label: 'Jadwal dan lokasi kantor', eyebrow: 'PENGATURAN HR' },
-    { path: '/admin/employees', label: 'Karyawan', eyebrow: 'DIREKTORI ORGANISASI' },
-    { path: '/admin/provisioning', label: 'Buat akun karyawan', eyebrow: 'AKSES & PROVISIONING' },
+    { path: '/home', label: 'Ringkasan', eyebrow: 'IKHTISAR ORGANISASI', icon: '⌂' },
+    { path: '/admin/provisioning', label: 'Tambah karyawan', eyebrow: 'AKSES & PROVISIONING', icon: '+' },
+    { path: '/admin/employees', label: 'Direktori karyawan', eyebrow: 'DIREKTORI ORGANISASI', icon: '◍' },
+    { path: '/admin/attendance', label: 'Absensi & keterlambatan', eyebrow: 'KEHADIRAN', icon: '◷' },
+    { path: '/admin/my-attendance', label: 'Absensi saya', eyebrow: 'KEHADIRAN PRIBADI', icon: '✓' },
+    { path: '/admin/leave', label: user.role === 'hr' ? 'Cuti & kalender' : 'Hak tahunan & kalender', eyebrow: 'CUTI & KALENDER', icon: '☰' },
+    { path: '/admin/requests', label: user.role === 'hr' ? 'Izin & lembur saya' : 'Persetujuan izin & lembur', eyebrow: 'LAYANAN MANDIRI', icon: '✉' },
+    { path: '/admin/performance', label: 'KPI & tinjauan kinerja', eyebrow: 'KINERJA TAHUNAN', icon: '▤' },
+    { path: '/admin/exam', label: 'Ujian KPI', eyebrow: 'UJIAN PEMAHAMAN', icon: '✎' },
+    { path: '/admin/exam-results', label: 'Nilai KPI', eyebrow: 'HASIL UJIAN', icon: '★' },
+    { path: '/admin/exam-schedule', label: 'Jadwal ujian', eyebrow: 'PENGATURAN UJIAN', icon: '◔' },
+    { path: '/admin/approvals', label: 'Persetujuan KPI', eyebrow: 'ANTREAN TINJAUAN', icon: '⇄' },
+    { path: '/admin/schedule', label: 'Jadwal & lokasi kantor', eyebrow: 'PENGATURAN HR', icon: '◎' },
+    { path: '/admin/profile', label: 'Profil saya', eyebrow: 'DATA PRIBADI', icon: '☺' },
   ];
   const employeePages = [
-    { path: '/home', label: 'Beranda', eyebrow: 'RINGKASAN SAYA' },
+    { path: '/home', label: 'Beranda', eyebrow: 'RINGKASAN SAYA', icon: '⌂' },
     ...(canUseSelfService(user.role) ? [
-      { path: '/attendance', label: 'Absensi saya', eyebrow: 'KEHADIRAN' },
-      { path: '/leave', label: 'Cuti dan saldo', eyebrow: 'CUTI TAHUNAN' },
-      { path: '/requests', label: 'Izin dan lembur', eyebrow: 'LAYANAN MANDIRI' },
+      { path: '/attendance', label: 'Absensi saya', eyebrow: 'KEHADIRAN', icon: '✓' },
+      { path: '/leave', label: 'Cuti dan saldo', eyebrow: 'CUTI TAHUNAN', icon: '☰' },
+      { path: '/requests', label: 'Izin dan lembur', eyebrow: 'LAYANAN MANDIRI', icon: '✉' },
     ] : []),
-    ...(user.role !== 'finance' ? [{ path: '/performance', label: 'KPI dan kinerja', eyebrow: 'KINERJA TAHUNAN' }] : []),
+    ...(user.role !== 'finance' ? [
+      { path: '/exam', label: 'Ujian KPI', eyebrow: 'UJIAN PEMAHAMAN', icon: '✎' },
+      { path: '/exam-results', label: 'Nilai KPI', eyebrow: 'HASIL UJIAN', icon: '★' },
+      { path: '/performance', label: 'KPI dan kinerja', eyebrow: 'KINERJA TAHUNAN', icon: '▤' },
+    ] : []),
     ...(user.role === 'manager' ? [
-      { path: '/approvals', label: 'Tinjauan kinerja tim', eyebrow: 'TINJAUAN TIM' },
-      { path: '/team', label: 'Tim saya', eyebrow: 'STRUKTUR TIM' },
+      { path: '/approvals', label: 'Tinjauan kinerja tim', eyebrow: 'TINJAUAN TIM', icon: '⇄' },
+      { path: '/team', label: 'Tim saya', eyebrow: 'STRUKTUR TIM', icon: '◍' },
     ] : []),
-    { path: '/profile', label: 'Profil saya', eyebrow: 'DATA KARYAWAN' },
+    { path: '/profile', label: 'Profil saya', eyebrow: 'DATA KARYAWAN', icon: '☺' },
   ];
   const navItems = isHR ? adminPages : employeePages;
   const activeRoute = navItems.some((page) => page.path === route) ? route : '/home';
@@ -1916,6 +1859,9 @@ function Dashboard({ user, onLogout }) {
     '/admin/requests': 'Ajukan dan lacak izin atau lembur; tinjau antrean sesuai kewenangan.',
     '/admin/profile': 'Periksa informasi profil pribadi dan perbarui foto Anda.',
     '/admin/performance': 'Susun target, catat progres, dan tinjau kinerja sepanjang tahun.',
+    '/admin/exam': 'Kerjakan ujian KPI sesuai jadwal yang ditetapkan HR untuk divisi Anda.',
+    '/admin/exam-results': 'Pantau hasil ujian karyawan dan (khusus superadmin) bank soal beserta kunci jawaban.',
+    '/admin/exam-schedule': 'Tentukan sendiri waktu mulai dan selesai ujian KPI setiap divisi.',
     '/admin/approvals': 'Tinjau dan putuskan target, hasil akhir, serta keberatan KPI.',
     '/admin/attendance': 'Pantau status masuk/pulang harian dan rekap keterlambatan.',
     '/admin/schedule': 'Atur jam kerja dan titik kantor yang menjadi dasar validasi absensi.',
@@ -1925,6 +1871,8 @@ function Dashboard({ user, onLogout }) {
     '/leave': 'Lihat hak cuti, saldo yang tersedia, dan status pengajuan.',
     '/requests': 'Ajukan izin atau lembur dan pantau status serta catatan persetujuannya.',
     '/performance': 'Lihat target, progres, dan hasil tinjauan kinerja Anda.',
+    '/exam': 'Kerjakan ujian KPI divisi Anda saat jadwal dibuka HR (10 soal, nilai lulus 70).',
+    '/exam-results': 'Nilai KPI hanya muncul setelah Anda menyelesaikan ujian.',
     '/approvals': 'Tinjau target dan evaluasi kinerja bawahan langsung.',
     '/team': 'Lihat daftar tim yang melapor langsung kepada Anda.',
     '/profile': 'Pastikan informasi profil dan foto Anda tetap terbaru.',
@@ -1943,13 +1891,13 @@ function Dashboard({ user, onLogout }) {
         </div>
       </header>
 
-      <div className={`workspace-shell ${isHR ? 'has-sidebar' : ''}`}>
+      <div className="workspace-shell has-sidebar">
         <aside className="workspace-sidebar">
           <div className="sidebar-caption">{isHR ? 'ADMINISTRASI' : 'RUANG KERJA'}</div>
           <nav aria-label="Navigasi utama">
             {navItems.map((item) => (
               <a key={item.path} href={`#${item.path}`} className={`workspace-nav-link ${activeRoute === item.path ? 'is-current' : ''}`}>
-                <span className="nav-indicator" aria-hidden="true" />
+                <span className="nav-icon" aria-hidden="true">{item.icon}</span>
                 <span>{item.label}</span>
               </a>
             ))}
@@ -1976,6 +1924,18 @@ function Dashboard({ user, onLogout }) {
                 <article className="summary-card"><span>{isHR ? 'Karyawan aktif' : 'Nomor karyawan'}</span><strong>{isHR ? (busy ? '—' : employees.length) : user.employee_number}</strong><small>{isHR ? 'Sesuai cakupan yang dipilih' : 'Profil organisasi'}</small></article>
                 <article className="summary-card"><span>Peran akses</span><strong className="role-value">{user.role}</strong><small>Akses sesuai kewenangan</small></article>
               </section>
+              <div className="dashboard-actions">
+                {isHR && <a className="primary" href="#/admin/provisioning">+ Tambah karyawan</a>}
+                <a className="secondary" href={isHR ? '#/admin/exam' : '#/exam'}>Ujian KPI</a>
+                <a className="secondary" href={isHR ? '#/admin/exam-results' : '#/exam-results'}>Nilai KPI</a>
+                <a className="secondary" href={isHR ? '#/admin/attendance' : '#/attendance'}>Absensi</a>
+                <a className="secondary" href="#/profile">Profil & foto</a>
+              </div>
+              <EmployeeProfile
+                profilePath="/api/v1/employees/me/profile"
+                photoPath="/api/v1/employees/me/photo"
+                canUpload
+              />
               {isHR ? (
                 <AttendanceOverview user={user} branches={branches} branchID={branchFilter} onBranchChange={setBranchFilter} />
               ) : (
@@ -1993,15 +1953,29 @@ function Dashboard({ user, onLogout }) {
             </>
           )}
 
-          {isHR && activeRoute === '/admin/leave' && (
+          {activeRoute === '/admin/leave' && isHR && (
             <>
               <LeaveSettings />
               <LeavePanel user={user} />
             </>
           )}
+          {activeRoute === '/admin/leave' && !isHR && <LeavePanel user={user} />}
 
           {(activeRoute === '/admin/performance' || activeRoute === '/performance') && user.role !== 'finance' && (
             <KPIWorkspace user={user} employees={employees} branches={branches} branchID={branchFilter} onBranchChange={setBranchFilter} view="review" />
+          )}
+
+          {(activeRoute === '/admin/exam' || activeRoute === '/exam') && user.role !== 'finance' && (
+            <KPIExam user={user} />
+          )}
+          {(activeRoute === '/admin/exam-results' || activeRoute === '/exam-results') && isHR && (
+            <KPIExamResults user={user} />
+          )}
+          {(activeRoute === '/admin/exam-results' || activeRoute === '/exam-results') && !isHR && user.role !== 'finance' && (
+            <ExamResultPanel user={user} />
+          )}
+          {activeRoute === '/admin/exam-schedule' && isHR && (
+            <ExamScheduleEditor branchID={branchFilter} onSaved={loadData} />
           )}
 
           {(activeRoute === '/admin/approvals' || activeRoute === '/approvals') && (
@@ -2021,6 +1995,7 @@ function Dashboard({ user, onLogout }) {
           )}
           {activeRoute === '/admin/attendance' && (
             <>
+              {canUseSelfService(user.role) && <AttendancePanel />}
               <AttendanceOverview user={user} branches={branches} branchID={branchFilter} onBranchChange={setBranchFilter} />
               <AttendanceReport user={user} branches={branches} branchID={branchFilter} onBranchChange={setBranchFilter} />
             </>
@@ -2030,7 +2005,7 @@ function Dashboard({ user, onLogout }) {
           {activeRoute === '/leave' && canUseSelfService(user.role) && <LeavePanel user={user} />}
           {(activeRoute === '/requests' || activeRoute === '/admin/requests') &&
             (canUseSelfService(user.role) || user.role === 'superadmin') && <EmployeeRequestsPanel user={user} />}
-          {(activeRoute === '/profile' || activeRoute === '/admin/profile') && canUseSelfService(user.role) && (
+          {(activeRoute === '/profile' || activeRoute === '/admin/profile') && (
             <EmployeeProfile
               profilePath="/api/v1/employees/me/profile"
               photoPath="/api/v1/employees/me/photo"
@@ -2052,10 +2027,10 @@ function Dashboard({ user, onLogout }) {
                 </div>
                 <div className="table-wrap">
                   <table>
-                    <thead><tr><th>Nama karyawan</th><th>Email</th><th>Cabang</th><th>Divisi</th><th>Jabatan</th><th>Grade</th><th>Role</th><th>Status</th>{isHR && <th>Profil</th>}</tr></thead>
+                    <thead><tr><th>Nama karyawan</th><th>Email</th><th>Cabang</th><th>Divisi</th><th>Jabatan</th><th>Grade</th><th>Role</th><th>Status</th><th>Detail</th></tr></thead>
                     <tbody>
-                      {busy ? <tr><td colSpan={isHR ? '9' : '8'} className="empty">Memuat data karyawan...</td></tr>
-                        : employees.length === 0 ? <tr><td colSpan={isHR ? '9' : '8'} className="empty">Belum ada karyawan pada daftar ini.</td></tr>
+                      {busy ? <tr><td colSpan="9" className="empty">Memuat data karyawan...</td></tr>
+                        : employees.length === 0 ? <tr><td colSpan="9" className="empty">Belum ada karyawan pada daftar ini.</td></tr>
                           : employees.map((employee) => (
                             <tr key={employee.user_id}>
                               <td><strong>{employee.full_name}</strong><small className="subtext">{employee.employee_number}</small></td>
@@ -2063,19 +2038,19 @@ function Dashboard({ user, onLogout }) {
                               <td>{employee.department || '—'}</td><td>{employee.position || '—'}</td><td>{employee.job_grade || '—'}</td>
                               <td><span className="role-pill">{employee.role}</span></td>
                               <td><span className={`active-pill ${employee.active ? 'is-active' : 'is-inactive'}`}>{employee.active ? 'Aktif' : 'Nonaktif'}</span></td>
-                              {isHR && <td><button type="button" className="secondary compact" onClick={() => setSelectedProfile(employee.user_id)}>Detail</button></td>}
+                              <td><button type="button" className="secondary compact" onClick={() => setSelectedProfile(employee.user_id)}>Detail</button></td>
                             </tr>
                           ))}
                     </tbody>
                   </table>
                 </div>
               </section>
-              {isHR && selectedProfile && (
+              {selectedProfile && (
                 <EmployeeProfile
                   key={selectedProfile}
                   profilePath={`/api/v1/employees/${selectedProfile}/profile`}
                   photoPath={`/api/v1/employees/${selectedProfile}/photo`}
-                  canUpload
+                  canUpload={isHR}
                   onClose={() => setSelectedProfile(null)}
                 />
               )}

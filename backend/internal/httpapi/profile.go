@@ -38,6 +38,7 @@ type employeeProfile struct {
 	PositionTitle    *string    `json:"position_title,omitempty"`
 	JobGrade         *string    `json:"job_grade,omitempty"`
 	Role             string     `json:"role"`
+	BirthDate        *string    `json:"birth_date,omitempty"`
 	EmploymentStatus string     `json:"employment_status"`
 	HiredOn          *string    `json:"hired_on,omitempty"`
 	ManagerName      *string    `json:"manager_name,omitempty"`
@@ -76,13 +77,14 @@ func writeEmployeeProfile(w http.ResponseWriter, r *http.Request, a *API, employ
 	err := a.db.QueryRow(r.Context(), `
 		SELECT u.id, e.employee_number, e.full_name, u.email, e.nik, e.phone, e.address,
 		       u.branch_id, b.name, d.name, e.position_title, e.job_grade, u.role,
-		       e.employment_status, e.hired_on::text, manager.full_name, manager.email,
+		       e.birth_date::text, e.employment_status, e.hired_on::text, manager_profile.full_name, manager.email,
 		       e.profile_photo_jpeg IS NOT NULL, e.profile_photo_updated_at, e.updated_at
 		FROM users u
 		JOIN employees e ON e.user_id = u.id
 		JOIN branches b ON b.id = u.branch_id
 		LEFT JOIN departments d ON d.id = e.department_id
-		LEFT JOIN users manager ON manager.id = u.manager_id
+			LEFT JOIN users manager ON manager.id = u.manager_id
+		LEFT JOIN employees manager_profile ON manager_profile.user_id = manager.id
 		WHERE u.id = $1
 		  AND (
 		      $2::boolean
@@ -93,7 +95,7 @@ func writeEmployeeProfile(w http.ResponseWriter, r *http.Request, a *API, employ
 		&profile.UserID, &profile.EmployeeNumber, &profile.FullName, &profile.Email,
 		&profile.NIK, &profile.Phone, &profile.Address, &profile.BranchID, &profile.BranchName,
 		&profile.Department, &profile.PositionTitle, &profile.JobGrade, &profile.Role,
-		&profile.EmploymentStatus, &profile.HiredOn, &profile.ManagerName, &profile.ManagerEmail,
+		&profile.BirthDate, &profile.EmploymentStatus, &profile.HiredOn, &profile.ManagerName, &profile.ManagerEmail,
 		&photoExists, &profile.PhotoUpdatedAt, &profile.ProfileUpdatedAt,
 	)
 	if err != nil {
