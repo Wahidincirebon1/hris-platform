@@ -1932,14 +1932,22 @@ function ThemeToggle() {
 function LiveClock({ branchName }) {
   const [now, setNow] = useState(new Date());
   useEffect(() => {
-    const timer = window.setInterval(() => setNow(new Date()), 1000);
-    return () => window.clearInterval(timer);
+    // Saat tab tidak aktif, jam tidak perlu diperbarui agar memori/CPU lebih ringan.
+    const tick = () => {
+      if (document.visibilityState === 'visible') setNow(new Date());
+    };
+    const timer = window.setInterval(tick, 10000);
+    document.addEventListener('visibilitychange', tick);
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener('visibilitychange', tick);
+    };
   }, []);
   return (
     <div className="live-clock" title="Waktu Indonesia Barat">
       <span className="live-clock-dot" aria-hidden="true" />
       <div className="live-clock-copy">
-        <strong>{formatWib(now, { hour: '2-digit', minute: '2-digit', second: '2-digit' })} WIB</strong>
+        <strong>{formatWib(now, { hour: '2-digit', minute: '2-digit' })} WIB</strong>
         <span>{formatWib(now, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}</span>
       </div>
       {branchName && <span className="live-clock-branch">{branchName}</span>}
