@@ -1,0 +1,65 @@
+name: hris-platform
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: hris_platform
+      POSTGRES_USER: hris_app
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Run scripts/Initialize-Local.ps1 to create a local secret}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U hris_app -d hris_platform"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    volumes:
+      - hris_platform_db_data:/var/lib/postgresql/data
+    networks:
+      - hris-internal
+
+  api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      DB_HOST: db
+      DB_PORT: "5432"
+      DB_NAME: hris_platform
+      DB_USER: hris_app
+      DB_PASSWORD: ${POSTGRES_PASSWORD:?Run scripts/Initialize-Local.ps1 to create a local secret}
+      JWT_SECRET: ${JWT_SECRET:?Run scripts/Initialize-Local.ps1 to create a local secret}
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
+      HTTP_ADDR: ":8081"
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "/app/hris-api", "healthcheck"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+    networks:
+      - hris-internal
+
+  web:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8090:80"
+    depends_on:
+      api:
+        condition: service_healthy
+    networks:
+      - hris-internal
+
+volumes:
+  hris_platform_db_data:
+
+networks:
+  hris-internal:
+    driver: bridge
