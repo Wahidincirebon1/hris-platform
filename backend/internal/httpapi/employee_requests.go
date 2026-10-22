@@ -67,9 +67,10 @@ func (a *API) employeeRequestApprovals(w http.ResponseWriter, r *http.Request) {
 	case "manager":
 		where, args = "WHERE q.status = 'pending_manager' AND q.manager_id = $1", []any{user.ID}
 	case "hr":
-		where = "WHERE q.status = 'pending_hr'"
+		// HR adalah pemroses data: melihat semua antrean, termasuk yang masih menunggu manager.
+		where, args = "WHERE q.status IN ('pending_manager', 'pending_hr') AND q.branch_id = $1", []any{user.BranchID}
 	case "superadmin":
-		where = "WHERE q.status = 'pending_superadmin'"
+		where = "WHERE q.status IN ('pending_manager', 'pending_hr', 'pending_superadmin')"
 	default:
 		writeError(w, http.StatusForbidden, "Antrean persetujuan hanya tersedia untuk manager, HR, dan superadmin.")
 		return
@@ -151,6 +152,7 @@ func (a *API) createEmployeeRequest(w http.ResponseWriter, r *http.Request) {
 	case "manager":
 		status = "pending_hr"
 	case "hr":
+		// Pengajuan HR dikirim ke superadmin, tetapi HR tetap dapat melihat seluruh antrean.
 		status = "pending_superadmin"
 	default:
 		writeError(w, http.StatusForbidden, "Role ini tidak dapat membuat pengajuan pribadi.")
@@ -382,7 +384,7 @@ func queryEmployeeRequests(ctx context.Context, q interface {
 }
 
 func canUseEmployeeSelfService(role string) bool {
-	return role == "employee" || role == "manager" || role == "hr"
+	return canUseSelfService(role)
 }
 
 func validRequestTime(value string) bool {

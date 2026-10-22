@@ -514,22 +514,28 @@ func (a *API) createEmployee(w http.ResponseWriter, r *http.Request) {
 	input.Email = strings.ToLower(strings.TrimSpace(input.Email))
 	input.EmployeeNumber = strings.TrimSpace(input.EmployeeNumber)
 	input.FullName = strings.TrimSpace(input.FullName)
+	// Grade hanya boleh 1–10.
 	if input.JobGrade != nil {
 		value := strings.TrimSpace(*input.JobGrade)
-		if len(value) > 80 {
-			writeError(w, http.StatusBadRequest, "Grade pekerjaan maksimal 80 karakter.")
-			return
-		}
 		if value == "" {
 			input.JobGrade = nil
 		} else {
-			input.JobGrade = &value
+			grade, err := strconv.Atoi(value)
+			if err != nil || grade < 1 || grade > 10 {
+				writeError(w, http.StatusBadRequest, "Grade harus berupa angka 1 sampai 10.")
+				return
+			}
+			normalized := strconv.Itoa(grade)
+			input.JobGrade = &normalized
 		}
 	}
 	email, err := mail.ParseAddress(input.Email)
-	if err != nil || email.Address != input.Email || input.FullName == "" ||
-		input.EmployeeNumber == "" || len(input.EmployeeNumber) > 64 {
-		writeError(w, http.StatusBadRequest, "Nama, email valid, dan nomor karyawan wajib diisi.")
+	if err != nil || email.Address != input.Email || input.FullName == "" {
+		writeError(w, http.StatusBadRequest, "Nama dan email valid wajib diisi.")
+		return
+	}
+	if len(input.EmployeeNumber) > 64 {
+		writeError(w, http.StatusBadRequest, "Nomor karyawan maksimal 64 karakter.")
 		return
 	}
 	if !validManagedRole(input.Role) && !(actor.Role == "superadmin" && input.Role == "hr") {
@@ -646,6 +652,16 @@ func (a *API) createEmployee(w http.ResponseWriter, r *http.Request) {
 		}
 		input.NIK = &autoNIK
 	}
+	// Nomor karyawan dibuat otomatis bila HR tidak mengisinya.
+	if input.EmployeeNumber == "" {
+		autoNumber, err := nextEmployeeNumber(r.Context(), tx, branchID)
+		if err != nil {
+			log.Printf("generate automatic employee number failed: %v", err)
+			writeError(w, http.StatusInternalServerError, "Nomor karyawan tidak dapat dibuat otomatis.")
+			return
+		}
+		input.EmployeeNumber = autoNumber
+	}
 	_, err = tx.Exec(r.Context(), `
 		INSERT INTO employees
 			(user_id, employee_number, full_name, nik, phone, address, branch_id, department_id, position_title, job_grade, birth_date)
@@ -719,6 +735,7 @@ func (a *API) createEmployee(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusCreated, map[string]any{
 		"user_id": userID, "must_change_password": true,
+		"employee_number": input.EmployeeNumber, "nik": input.NIK,
 		"message": "Akun dibuat. Sampaikan password sementara melalui kanal aman.",
 	})
 }
@@ -767,14 +784,16 @@ func (a *API) updateEmployee(w http.ResponseWriter, r *http.Request) {
 	}
 	if input.JobGrade != nil {
 		value := strings.TrimSpace(*input.JobGrade)
-		if len(value) > 80 {
-			writeError(w, http.StatusBadRequest, "Grade pekerjaan maksimal 80 karakter.")
-			return
-		}
 		if value == "" {
 			input.JobGrade = nil
 		} else {
-			input.JobGrade = &value
+			grade, err := strconv.Atoi(value)
+			if err != nil || grade < 1 || grade > 10 {
+				writeError(w, http.StatusBadRequest, "Grade harus berupa angka 1 sampai 10.")
+				return
+			}
+			normalized := strconv.Itoa(grade)
+			input.JobGrade = &normalized
 		}
 	}
 	branchID, err := uuid.Parse(input.BranchID)
@@ -1222,15 +1241,38 @@ func formatScore(score float64) string {
 	return strconv.FormatFloat(score, 'f', 2, 64)
 }
 
-// nextNIK menghasilkan NIK unik 16 digit otomatis: kode cabang 2 digit + tahun-bulan-hari lahir jabatan + nomor urut.
+// nextNIK menghasilkan NIK unik 16 digit otomatis.
 func nextNIK(ctx context.Context, q rowQuerier) (string, error) {
 	var next int
-	if err := q.QueryRow(ctx, "SELECT COALESCE(count(*), 0)::integer + 1 FROM employees WHERE nik LIKE '90%'").Scan(&next); err != nil {
+	if err := q.QueryRow(ctx, "SELECT COALESCE(max(substring(nik from 11)::integer), 0) + 1 FROM employees WHERE nik ~ '^90[0-9]{14}$'").Scan(&next); err != nil {
 		return "", err
 	}
-	// 90 = kode sumber sistem; 10 digit pertama menjadi basis, 6 digit terakhir nomor urut.
-	nik := "90" + time.Now().In(jakartaTime).Format("20060102") + fmt.Sprintf("%06d", next)
-	return nik, nil
+	return "90" + time.Now().In(jakartaTime).Format("20060102") + fmt.Sprintf("%06d", next), nil
+}
+
+// nextEmployeeNumber menghasilkan nomor karyawan otomatis: kode cabang + tahun + urutan 4 digit.
+func nextEmployeeNumber(ctx context.Context, q rowQuerier, branchID uuid.UUID) (string, error) {
+	var code string
+	if err := q.QueryRow(ctx, "SELECT code FROM branches WHERE id = $1", branchID).Scan(&code); err != nil {
+		return "", err
+	}
+	year := time.Now().In(jakartaTime).Format("2006")
+	prefix := strings.ToUpper(code) + "-" + year + "-"
+	var last string
+	err := q.QueryRow(ctx, `
+		SELECT employee_number FROM employees
+		WHERE employee_number LIKE $1 || '%'
+		ORDER BY employee_number DESC LIMIT 1
+	`, prefix).Scan(&last)
+	next := 1
+	if err == nil {
+		if parsed, convErr := strconv.Atoi(strings.TrimPrefix(last, prefix)); convErr == nil {
+			next = parsed + 1
+		}
+	} else if !errors.Is(err, pgx.ErrNoRows) {
+		return "", err
+	}
+	return fmt.Sprintf("%s%04d", prefix, next), nil
 }
 
 type loginLimiter struct {

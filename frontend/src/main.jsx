@@ -1,8 +1,14 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import './style.css';
-import { ExamResultPanel, ExamScheduleEditor, KPIExam, KPIExamResults } from './exam-panels.jsx';
 import { api, canUseSelfService, formatWib, jakartaDate, shiftDate, timeInputWib } from './shared.js';
+import { ExamResultPanel, ExamScheduleEditor, KPIExam, KPIExamResults } from './exam-panels.jsx';
+import { EmployeeEditor } from './employee-editor.jsx';
+
+try {
+  const storedTheme = window.localStorage.getItem('hris-theme');
+  if (storedTheme === 'dark' || storedTheme === 'light') document.documentElement.dataset.theme = storedTheme;
+} catch { /* penyimpanan opsional */ }
 
 const emptyEmployee = {
   email: '',
@@ -226,9 +232,9 @@ function EmployeeProvisioning({ branches, branchID, employees, onCreated, isSupe
         position_title: form.position_title || null,
         manager_id: form.manager_id || null,
       };
-      await api('/api/v1/employees', { method: 'POST', body: JSON.stringify(payload) });
+      const created = await api('/api/v1/employees', { method: 'POST', body: JSON.stringify(payload) });
       setForm({ ...emptyEmployee, branch_id: branchID });
-      setNotice('Akun karyawan dibuat. Sampaikan password sementara melalui kanal yang aman.');
+      setNotice(`Akun karyawan dibuat dengan nomor karyawan ${created.employee_number}. Sampaikan password sementara melalui kanal yang aman.`);
       await onCreated();
     } catch (requestError) {
       setError(requestError.message);
@@ -258,7 +264,14 @@ function EmployeeProvisioning({ branches, branchID, employees, onCreated, isSupe
             {departments.map((department) => <option key={department.id} value={department.id}>{department.name}</option>)}
           </select>
         </label>
-        <label>Grade pekerjaan<input value={form.job_grade} onChange={(event) => update('job_grade', event.target.value)} maxLength={80} placeholder="Contoh: G5 / Senior" /></label>
+        <label>Grade
+          <select value={form.job_grade} onChange={(event) => update('job_grade', event.target.value)}>
+            <option value="">Belum ditentukan</option>
+            {Array.from({ length: 10 }, (_, index) => index + 1).map((grade) => (
+              <option key={grade} value={String(grade)}>Grade {grade}</option>
+            ))}
+          </select>
+        </label>
         <label>Posisi / jabatan<input value={form.position_title} onChange={(event) => update('position_title', event.target.value)} maxLength={100} /></label>
         <label>Email kerja<input type="email" autoComplete="email" value={form.email} onChange={(event) => update('email', event.target.value)} required /></label>
         <label>Nomor telepon<input type="tel" autoComplete="tel" value={form.phone} onChange={(event) => update('phone', event.target.value)} maxLength={40} /></label>
@@ -283,7 +296,7 @@ function EmployeeProvisioning({ branches, branchID, employees, onCreated, isSupe
             {managers.map((manager) => <option key={manager.user_id} value={manager.user_id}>{manager.full_name}</option>)}
           </select>
         </label>
-        <label>Nomor karyawan<input value={form.employee_number} onChange={(event) => update('employee_number', event.target.value)} required maxLength={64} /></label>
+        <label>Nomor karyawan (otomatis)<input value={form.employee_number} onChange={(event) => update('employee_number', event.target.value)} maxLength={64} placeholder="Dibuat otomatis saat akun disimpan" /></label>
         <label>Password sementara<input type="password" autoComplete="new-password" value={form.temporary_password} onChange={(event) => update('temporary_password', event.target.value)} minLength={12} required /></label>
         <div className="form-actions">
           <button className="primary" disabled={busy}>{busy ? 'Membuat akun...' : 'Buat akun'}</button>
@@ -498,13 +511,14 @@ function AttendanceOverview({ user, branches, branchID, onBranchChange }) {
   );
 }
 
-function EmployeeProfile({ profilePath, photoPath, canUpload, onClose }) {
+function EmployeeProfile({ profilePath, photoPath, canUpload, canEdit, onEdit, onClose }) {
   const [profile, setProfile] = useState(null);
   const [file, setFile] = useState(null);
   const [preview, setPreview] = useState('');
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [busy, setBusy] = useState(false);
+  const fileInputRef = useRef(null);
 
   const loadProfile = useCallback(async () => {
     setError('');
@@ -526,29 +540,38 @@ function EmployeeProfile({ profilePath, photoPath, canUpload, onClose }) {
     return () => URL.revokeObjectURL(objectURL);
   }, [file]);
 
-  async function uploadPhoto(event) {
-    event.preventDefault();
-    if (!file) {
-      setError('Pilih foto JPG atau PNG terlebih dahulu.');
-      return;
-    }
+  async function uploadPhoto(selected) {
+    if (!selected) return;
     setBusy(true);
     setError('');
     setNotice('');
     try {
       const body = new FormData();
-      body.append('photo', file);
+      body.append('photo', selected);
       const response = await fetch(photoPath, { method: 'POST', credentials: 'same-origin', body });
       const result = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(result.error || `Upload foto gagal (${response.status}).`);
       setFile(null);
-      setNotice(`Foto diperbarui menjadi ${result.width} × ${result.height} piksel.`);
+      setNotice('Foto profil berhasil diperbarui.');
       await loadProfile();
     } catch (requestError) {
       setError(requestError.message);
     } finally {
       setBusy(false);
     }
+  }
+
+  function choosePhoto(event) {
+    const selected = event.target.files?.[0] || null;
+    event.target.value = '';
+    if (!selected) return;
+    if (!['image/jpeg', 'image/png'].includes(selected.type) || selected.size > 5 * 1024 * 1024) {
+      setError('Foto harus JPG/PNG dengan ukuran maksimal 5 MB.');
+      return;
+    }
+    setError('');
+    setFile(selected);
+    uploadPhoto(selected);
   }
 
   const photoURL = preview || (profile?.profile_photo_url
@@ -558,44 +581,57 @@ function EmployeeProfile({ profilePath, photoPath, canUpload, onClose }) {
   return (
     <section className="panel employee-profile-panel">
       <div className="section-heading">
-        <div><div className="eyebrow">{canUpload ? 'PROFIL KARYAWAN' : 'DIREKTORI KARYAWAN'}</div><h2>{profile?.full_name || 'Detail karyawan'}</h2></div>
-        {onClose && <button type="button" className="secondary compact" onClick={onClose}>Tutup profil</button>}
+        <div><div className="eyebrow">PROFIL KARYAWAN</div><h2>{profile?.full_name || 'Detail karyawan'}</h2></div>
+        <div className="profile-heading-actions">
+          {canEdit && profile && <button type="button" className="secondary compact" onClick={() => onEdit?.(profile.user_id)}>Edit data</button>}
+          {onClose && <button type="button" className="secondary compact" onClick={onClose}>Tutup profil</button>}
+        </div>
       </div>
       {error && <div className="alert error" role="alert">{error}</div>}
       {notice && <div className="alert success" role="status">{notice}</div>}
       {!profile ? <p className="muted">{error ? 'Profil belum berhasil dimuat.' : 'Memuat profil…'} <button type="button" className="secondary compact" onClick={loadProfile}>Muat ulang profil</button></p> : (
         <>
-          <div className="employee-profile-header">
-            <div className="employee-avatar">
-              {photoURL ? <img src={photoURL} alt={`Foto ${profile.full_name}`} /> : <span>{profile.full_name.split(/\s+/).slice(0, 2).map((part) => part[0]).join('').toUpperCase()}</span>}
+          <div className="profile-hero">
+            <div className="profile-avatar-wrap">
+              <button
+                type="button"
+                className={`employee-avatar profile-avatar-button ${canUpload ? 'is-editable' : ''}`}
+                onClick={() => canUpload && fileInputRef.current?.click()}
+                disabled={!canUpload || busy}
+                title={canUpload ? 'Klik untuk mengganti foto profil' : undefined}
+                aria-label={canUpload ? 'Ganti foto profil' : `Foto ${profile.full_name}`}
+              >
+                {photoURL ? <img src={photoURL} alt={`Foto ${profile.full_name}`} /> : <span>{profile.full_name.split(/\s+/).slice(0, 2).map((part) => part[0]).join('').toUpperCase()}</span>}
+                {canUpload && (
+                  <span className="avatar-overlay" aria-hidden="true">
+                    {busy ? 'Mengunggah…' : 'Ganti foto profil'}
+                  </span>
+                )}
+              </button>
+              {canUpload && (
+                <input
+                  ref={fileInputRef}
+                  className="visually-hidden-input"
+                  type="file"
+                  accept="image/jpeg,image/png"
+                  onChange={choosePhoto}
+                  aria-label="Pilih foto profil"
+                />
+              )}
             </div>
-            <div><div className="eyebrow">{profile.employee_number}</div><h3>{profile.full_name}</h3><p>{profile.position_title || 'Jabatan belum ditentukan'} · {profile.branch_name}</p></div>
+            <div className="profile-hero-copy">
+              <span className="role-pill">{profile.role}</span>
+              <h3>{profile.full_name}</h3>
+              <p>{profile.position_title || 'Posisi belum ditentukan'} · {profile.department || 'Divisi belum ditentukan'}</p>
+              <p className="subtext">{profile.employee_number} · {profile.branch_name}</p>
+            </div>
           </div>
-          {canUpload && (
-            <form className="profile-photo-form" onSubmit={uploadPhoto}>
-              <label>Foto profil (JPG/PNG, maks. 5 MB)
-                <input type="file" accept="image/jpeg,image/png" onChange={(event) => {
-                  const selected = event.target.files?.[0] || null;
-                  if (selected && (!['image/jpeg', 'image/png'].includes(selected.type) || selected.size > 5 * 1024 * 1024)) {
-                    setError('Foto harus JPG/PNG dengan ukuran maksimal 5 MB.');
-                    setFile(null);
-                    event.target.value = '';
-                    return;
-                  }
-                  setError('');
-                  setFile(selected);
-                }} />
-              </label>
-              <button className="primary" disabled={busy}>{busy ? 'Memproses foto…' : 'Simpan foto profil'}</button>
-              <span className="muted">Foto akan dipotong persegi di tengah dan disimpan 512 × 512 px.</span>
-            </form>
-          )}
           <div className="profile-grid employee-profile-grid">
             <div><span>Nama lengkap</span><strong>{profile.full_name}</strong></div>
             <div><span>Tanggal lahir</span><strong>{profile.birth_date ? formatWib(`${profile.birth_date}T00:00:00+07:00`, { dateStyle: 'long' }) : 'Belum diisi'}</strong></div>
             <div><span>NIK</span><strong>{profile.nik || 'Belum diisi'}</strong></div>
             <div><span>Divisi</span><strong>{profile.department || 'Belum ditentukan'}</strong></div>
-            <div><span>Grade</span><strong>{profile.job_grade || 'Belum ditentukan'}</strong></div>
+            <div><span>Grade</span><strong>{profile.job_grade ? `Grade ${profile.job_grade}` : 'Belum ditentukan'}</strong></div>
             <div><span>Posisi / jabatan</span><strong>{profile.position_title || 'Belum ditentukan'}</strong></div>
             <div><span>Email</span><strong>{profile.email}</strong></div>
             <div><span>Nomor telepon</span><strong>{profile.phone || 'Belum diisi'}</strong></div>
@@ -1768,6 +1804,44 @@ function AttendanceReport({ user, branches, branchID, onBranchChange }) {
   );
 }
 
+function ThemeToggle() {
+  const [theme, setTheme] = useState(() => document.documentElement.dataset.theme || 'light');
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+    try { window.localStorage.setItem('hris-theme', theme); } catch { /* penyimpanan opsional */ }
+  }, [theme]);
+  return (
+    <button
+      type="button"
+      className="theme-toggle"
+      onClick={() => setTheme((current) => (current === 'dark' ? 'light' : 'dark'))}
+      title={theme === 'dark' ? 'Beralih ke tema terang' : 'Beralih ke tema gelap'}
+      aria-label={theme === 'dark' ? 'Beralih ke tema terang' : 'Beralih ke tema gelap'}
+    >
+      <span aria-hidden="true">{theme === 'dark' ? '☀' : '☾'}</span>
+      <span className="theme-toggle-label">{theme === 'dark' ? 'Terang' : 'Gelap'}</span>
+    </button>
+  );
+}
+
+function LiveClock({ branchName }) {
+  const [now, setNow] = useState(new Date());
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(new Date()), 1000);
+    return () => window.clearInterval(timer);
+  }, []);
+  return (
+    <div className="live-clock" title="Waktu Indonesia Barat">
+      <span className="live-clock-dot" aria-hidden="true" />
+      <div className="live-clock-copy">
+        <strong>{formatWib(now, { hour: '2-digit', minute: '2-digit', second: '2-digit' })} WIB</strong>
+        <span>{formatWib(now, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}</span>
+      </div>
+      {branchName && <span className="live-clock-branch">{branchName}</span>}
+    </div>
+  );
+}
+
 function Dashboard({ user, onLogout }) {
   const [branches, setBranches] = useState([]);
   const [employees, setEmployees] = useState([]);
@@ -1775,6 +1849,7 @@ function Dashboard({ user, onLogout }) {
   const [branchFilter, setBranchFilter] = useState(isHR ? '' : user.branch_id);
   const [route, setRoute] = useState(() => window.location.hash.slice(1) || '/home');
   const [selectedProfile, setSelectedProfile] = useState(null);
+  const [editTarget, setEditTarget] = useState(null);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(true);
 
@@ -1886,6 +1961,8 @@ function Dashboard({ user, onLogout }) {
           <span>Human Resources <small>Information System</small></span>
         </a>
         <div className="account">
+          <LiveClock branchName={branchName} />
+          <ThemeToggle />
           <div className="account-copy"><strong>{user.full_name}</strong><span>{user.role} · {branchName}</span></div>
           <button type="button" className="secondary compact" onClick={logout}>Keluar</button>
         </div>
@@ -1912,7 +1989,13 @@ function Dashboard({ user, onLogout }) {
               <h1>{activeRoute === '/home' ? `Selamat datang, ${user.full_name}` : activePage.label}</h1>
               <p>{pageSummary}</p>
             </div>
-            <div className="welcome-badge"><span className="status-dot" /> {branchName} · WIB</div>
+            <div className="welcome-side">
+              <div className="welcome-badge"><span className="status-dot" /> {branchName} · WIB</div>
+              <div className="welcome-time">
+                <span>{formatWib(new Date(), { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}</span>
+                <strong>{formatWib(new Date(), { hour: '2-digit', minute: '2-digit' })} WIB</strong>
+              </div>
+            </div>
           </section>
 
           {error && <div className="alert error" role="alert">{error}</div>}
@@ -1935,7 +2018,24 @@ function Dashboard({ user, onLogout }) {
                 profilePath="/api/v1/employees/me/profile"
                 photoPath="/api/v1/employees/me/photo"
                 canUpload
+                canEdit={false}
               />
+              {isHR && editTarget && (
+                <EmployeeEditor
+                  key={`edit-${editTarget}`}
+                  userID={editTarget}
+                  branches={branches}
+                  employees={employees}
+                  onSaved={loadData}
+                  onClose={() => setEditTarget(null)}
+                />
+              )}
+              {!isHR ? null : (
+                <div className="page-tools">
+                  <span className="eyebrow">KELOLA DATA</span>
+                  <p className="muted">Ingin mengoreksi data karyawan? Buka <a href="#/admin/employees">Direktori karyawan</a> lalu pilih <strong>Detail → Edit data</strong>.</p>
+                </div>
+              )}
               {isHR ? (
                 <AttendanceOverview user={user} branches={branches} branchID={branchFilter} onBranchChange={setBranchFilter} />
               ) : (
@@ -2006,11 +2106,24 @@ function Dashboard({ user, onLogout }) {
           {(activeRoute === '/requests' || activeRoute === '/admin/requests') &&
             (canUseSelfService(user.role) || user.role === 'superadmin') && <EmployeeRequestsPanel user={user} />}
           {(activeRoute === '/profile' || activeRoute === '/admin/profile') && (
-            <EmployeeProfile
-              profilePath="/api/v1/employees/me/profile"
-              photoPath="/api/v1/employees/me/photo"
-              canUpload
-            />
+            <>
+              <EmployeeProfile
+                profilePath="/api/v1/employees/me/profile"
+                photoPath="/api/v1/employees/me/photo"
+                canUpload
+                canEdit={false}
+              />
+              {isHR && editTarget && (
+                <EmployeeEditor
+                  key={`edit-${editTarget}`}
+                  userID={editTarget}
+                  branches={branches}
+                  employees={employees}
+                  onSaved={loadData}
+                  onClose={() => setEditTarget(null)}
+                />
+              )}
+            </>
           )}
 
           {(activeRoute === '/admin/employees' || activeRoute === '/team') && (isHR || user.role === 'manager') && (
@@ -2038,7 +2151,10 @@ function Dashboard({ user, onLogout }) {
                               <td>{employee.department || '—'}</td><td>{employee.position || '—'}</td><td>{employee.job_grade || '—'}</td>
                               <td><span className="role-pill">{employee.role}</span></td>
                               <td><span className={`active-pill ${employee.active ? 'is-active' : 'is-inactive'}`}>{employee.active ? 'Aktif' : 'Nonaktif'}</span></td>
-                              <td><button type="button" className="secondary compact" onClick={() => setSelectedProfile(employee.user_id)}>Detail</button></td>
+                              <td><div className="row-actions">
+                                <button type="button" className="secondary compact" onClick={() => setSelectedProfile(employee.user_id)}>Detail</button>
+                                {isHR && <button type="button" className="secondary compact" onClick={() => setEditTarget(employee.user_id)}>Edit</button>}
+                              </div></td>
                             </tr>
                           ))}
                     </tbody>
@@ -2051,7 +2167,19 @@ function Dashboard({ user, onLogout }) {
                   profilePath={`/api/v1/employees/${selectedProfile}/profile`}
                   photoPath={`/api/v1/employees/${selectedProfile}/photo`}
                   canUpload={isHR}
+                  canEdit={isHR}
+                  onEdit={(userID) => setEditTarget(userID)}
                   onClose={() => setSelectedProfile(null)}
+                />
+              )}
+              {isHR && editTarget && (
+                <EmployeeEditor
+                  key={`edit-${editTarget}`}
+                  userID={editTarget}
+                  branches={branches}
+                  employees={employees}
+                  onSaved={loadData}
+                  onClose={() => setEditTarget(null)}
                 />
               )}
             </>
