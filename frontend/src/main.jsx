@@ -27,6 +27,36 @@ const emptyEmployee = {
   role: 'employee',
 };
 
+function PasswordField({ id, label, value, onChange, autoComplete = 'current-password', placeholder, minLength, required = true }) {
+  const [visible, setVisible] = useState(false);
+  return (
+    <label htmlFor={id}>
+      {label}
+      <span className="password-field">
+        <input
+          id={id}
+          autoComplete={autoComplete}
+          type={visible ? 'text' : 'password'}
+          placeholder={placeholder}
+          value={value}
+          onChange={onChange}
+          minLength={minLength}
+          required={required}
+        />
+        <button
+          type="button"
+          className="password-toggle"
+          onClick={() => setVisible((current) => !current)}
+          aria-label={visible ? 'Sembunyikan password' : 'Tampilkan password'}
+          aria-pressed={visible}
+        >
+          <span aria-hidden="true">{visible ? '🙈' : '👁'}</span>
+        </button>
+      </span>
+    </label>
+  );
+}
+
 function Login({ onLogin }) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -72,8 +102,11 @@ function Login({ onLogin }) {
         </aside>
         <section className="auth-panel">
           <div className="auth-panel-inner">
-            <div className="auth-mobile-brand">
-              <span className="brand-mark">H</span><span>Human Resources <small>Information System</small></span>
+            <div className="auth-panel-top">
+              <div className="auth-mobile-brand">
+                <span className="brand-mark">H</span><span>Human Resources <small>Information System</small></span>
+              </div>
+              <ThemeToggle />
             </div>
             <div className="eyebrow">SELAMAT DATANG KEMBALI</div>
             <h2>Masuk ke akun Anda</h2>
@@ -91,17 +124,13 @@ function Login({ onLogin }) {
                   required
                 />
               </label>
-              <label>
-                Password
-                <input
-                  autoComplete="current-password"
-                  type="password"
-                  placeholder="Masukkan password"
-                  value={password}
-                  onChange={(event) => setPassword(event.target.value)}
-                  required
-                />
-              </label>
+              <PasswordField
+                id="login-password"
+                label="Password"
+                placeholder="Masukkan password"
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
+              />
               <button className="primary auth-submit" disabled={busy}>
                 {busy ? 'Memeriksa...' : 'Masuk ke aplikasi'}
                 {!busy && <span aria-hidden="true">→</span>}
@@ -165,8 +194,11 @@ function ChangePassword({ onChanged, onLogout }) {
         </aside>
         <section className="auth-panel">
           <div className="auth-panel-inner">
-            <div className="auth-mobile-brand">
-              <span className="brand-mark">H</span><span>Human Resources <small>Information System</small></span>
+            <div className="auth-panel-top">
+              <div className="auth-mobile-brand">
+                <span className="brand-mark">H</span><span>Human Resources <small>Information System</small></span>
+              </div>
+              <ThemeToggle />
             </div>
             <div className="eyebrow">PENGAMANAN AKUN</div>
             <h2>Buat password baru</h2>
@@ -380,7 +412,7 @@ function AttendancePanel() {
   return (
     <section className="panel">
       <div className="section-heading">
-        <div><div className="eyebrow">ABSENSI SAYA</div><h2>Masuk dan pulang</h2></div>
+        <div><div className="eyebrow">ABSENSI</div><h2>Masuk dan pulang</h2></div>
         {today && <span className="role-pill">{formatWib(`${today.date}T00:00:00+07:00`, { dateStyle: 'medium' })} · WIB</span>}
       </div>
       <p className="muted">Jadwal {today?.schedule?.work_start?.slice(0, 5) || '08:30'}–{today?.schedule?.work_end?.slice(0, 5) || '18:00'} WIB, Senin–Jumat. Lokasi hanya dipakai saat menekan tombol absensi; koordinat mentah tidak disimpan.</p>
@@ -598,13 +630,13 @@ function EmployeeProfile({ profilePath, photoPath, canUpload, canEdit, onEdit, o
                 className={`employee-avatar profile-avatar-button ${canUpload ? 'is-editable' : ''}`}
                 onClick={() => canUpload && fileInputRef.current?.click()}
                 disabled={!canUpload || busy}
-                title={canUpload ? 'Klik untuk mengganti foto profil' : undefined}
-                aria-label={canUpload ? 'Ganti foto profil' : `Foto ${profile.full_name}`}
+                title={canUpload ? 'Klik untuk mengganti profile' : undefined}
+                aria-label={canUpload ? 'Ganti profile' : `Foto ${profile.full_name}`}
               >
                 {photoURL ? <img src={photoURL} alt={`Foto ${profile.full_name}`} /> : <span>{profile.full_name.split(/\s+/).slice(0, 2).map((part) => part[0]).join('').toUpperCase()}</span>}
                 {canUpload && (
                   <span className="avatar-overlay" aria-hidden="true">
-                    {busy ? 'Mengunggah…' : 'Ganti foto profil'}
+                    {busy ? 'Mengunggah…' : 'Ganti profile'}
                   </span>
                 )}
               </button>
@@ -636,7 +668,7 @@ function EmployeeProfile({ profilePath, photoPath, canUpload, canEdit, onEdit, o
             <div><span>Email</span><strong>{profile.email}</strong></div>
             <div><span>Nomor telepon</span><strong>{profile.phone || 'Belum diisi'}</strong></div>
             <div><span>Alamat</span><strong>{profile.address || 'Belum diisi'}</strong></div>
-            <div><span>Status karyawan</span><strong>{profile.employment_status}</strong></div>
+            <div><span>Status karyawan</span><strong>{profile.employment_status === 'active' ? 'Aktif' : profile.employment_status === 'inactive' ? 'Nonaktif' : profile.employment_status}</strong></div>
             <div><span>Cabang</span><strong>{profile.branch_name}</strong></div>
             <div><span>Atasan langsung</span><strong>{profile.manager_name || 'Belum ditetapkan'}</strong></div>
             <div><span>Role akses</span><strong>{profile.role}</strong></div>
@@ -964,7 +996,7 @@ function EmployeeRequestsPanel({ user }) {
   return (
     <section className="panel">
       <div className="section-heading">
-        <div><div className="eyebrow">LAYANAN MANDIRI</div><h2>Izin dan lembur</h2></div>
+        <div><div className="eyebrow">LAYANAN MANDIRI</div><h2>Izin & lembur</h2></div>
         <span className="role-pill">Tanpa perhitungan payroll</span>
       </div>
       <p className="muted">Pengajuan dan keputusan tercatat untuk ditinjau. Pengajuan karyawan melewati atasan lalu HR; pengajuan manager langsung ke HR; pengajuan HR ditinjau superadmin.</p>
@@ -1017,7 +1049,7 @@ function EmployeeRequestsPanel({ user }) {
 
       {canApprove && (
         <div className="leave-approvals">
-          <div className="section-heading"><div><div className="eyebrow">TINJAUAN PENGAJUAN</div><h2>Antrean izin dan lembur</h2></div></div>
+          <div className="section-heading"><div><div className="eyebrow">TINJAUAN PENGAJUAN</div><h2>Antrean izin & lembur</h2></div></div>
           <div className="table-wrap">
             <table>
               <thead><tr><th>Pemohon</th><th>Jenis / periode</th><th>Waktu</th><th>Alasan</th><th>Keputusan</th></tr></thead>
@@ -1810,16 +1842,26 @@ function ThemeToggle() {
     document.documentElement.dataset.theme = theme;
     try { window.localStorage.setItem('hris-theme', theme); } catch { /* penyimpanan opsional */ }
   }, [theme]);
+  const isDark = theme === 'dark';
   return (
     <button
       type="button"
       className="theme-toggle"
-      onClick={() => setTheme((current) => (current === 'dark' ? 'light' : 'dark'))}
-      title={theme === 'dark' ? 'Beralih ke tema terang' : 'Beralih ke tema gelap'}
-      aria-label={theme === 'dark' ? 'Beralih ke tema terang' : 'Beralih ke tema gelap'}
+      onClick={() => setTheme(isDark ? 'light' : 'dark')}
+      title={isDark ? 'Beralih ke tema terang' : 'Beralih ke tema gelap'}
+      aria-label={isDark ? 'Beralih ke tema terang' : 'Beralih ke tema gelap'}
     >
-      <span aria-hidden="true">{theme === 'dark' ? '☀' : '☾'}</span>
-      <span className="theme-toggle-label">{theme === 'dark' ? 'Terang' : 'Gelap'}</span>
+      <svg className="theme-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+        {isDark ? (
+          <g fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
+            <circle cx="12" cy="12" r="4.2" />
+            <path d="M12 2.6v2.2M12 19.2v2.2M4.2 12H2M22 12h-2.2M5.9 5.9l1.6 1.6M16.5 16.5l1.6 1.6M18.1 5.9l-1.6 1.6M7.5 16.5l-1.6 1.6" />
+          </g>
+        ) : (
+          <path d="M20.5 14.2A8.6 8.6 0 0 1 9.8 3.5a8.6 8.6 0 1 0 10.7 10.7Z" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
+        )}
+      </svg>
+      <span className="theme-toggle-label">{isDark ? 'Terang' : 'Gelap'}</span>
     </button>
   );
 }
@@ -1858,9 +1900,9 @@ function Dashboard({ user, onLogout }) {
     { path: '/admin/provisioning', label: 'Tambah karyawan', eyebrow: 'AKSES & PROVISIONING', icon: '+' },
     { path: '/admin/employees', label: 'Direktori karyawan', eyebrow: 'DIREKTORI ORGANISASI', icon: '◍' },
     { path: '/admin/attendance', label: 'Absensi & keterlambatan', eyebrow: 'KEHADIRAN', icon: '◷' },
-    { path: '/admin/my-attendance', label: 'Absensi saya', eyebrow: 'KEHADIRAN PRIBADI', icon: '✓' },
+    { path: '/admin/my-attendance', label: 'Absensi', eyebrow: 'KEHADIRAN PRIBADI', icon: '✓' },
     { path: '/admin/leave', label: user.role === 'hr' ? 'Cuti & kalender' : 'Hak tahunan & kalender', eyebrow: 'CUTI & KALENDER', icon: '☰' },
-    { path: '/admin/requests', label: user.role === 'hr' ? 'Izin & lembur saya' : 'Persetujuan izin & lembur', eyebrow: 'LAYANAN MANDIRI', icon: '✉' },
+    { path: '/admin/requests', label: 'Izin & lembur', eyebrow: 'LAYANAN MANDIRI', icon: '✉' },
     { path: '/admin/performance', label: 'KPI & tinjauan kinerja', eyebrow: 'KINERJA TAHUNAN', icon: '▤' },
     { path: '/admin/exam', label: 'Ujian KPI', eyebrow: 'UJIAN PEMAHAMAN', icon: '✎' },
     { path: '/admin/exam-results', label: 'Nilai KPI', eyebrow: 'HASIL UJIAN', icon: '★' },
@@ -1872,9 +1914,9 @@ function Dashboard({ user, onLogout }) {
   const employeePages = [
     { path: '/home', label: 'Beranda', eyebrow: 'RINGKASAN SAYA', icon: '⌂' },
     ...(canUseSelfService(user.role) ? [
-      { path: '/attendance', label: 'Absensi saya', eyebrow: 'KEHADIRAN', icon: '✓' },
+      { path: '/attendance', label: 'Absensi', eyebrow: 'KEHADIRAN', icon: '✓' },
       { path: '/leave', label: 'Cuti dan saldo', eyebrow: 'CUTI TAHUNAN', icon: '☰' },
-      { path: '/requests', label: 'Izin dan lembur', eyebrow: 'LAYANAN MANDIRI', icon: '✉' },
+      { path: '/requests', label: 'Izin & lembur', eyebrow: 'LAYANAN MANDIRI', icon: '✉' },
     ] : []),
     ...(user.role !== 'finance' ? [
       { path: '/exam', label: 'Ujian KPI', eyebrow: 'UJIAN PEMAHAMAN', icon: '✎' },
@@ -2151,10 +2193,7 @@ function Dashboard({ user, onLogout }) {
                               <td>{employee.department || '—'}</td><td>{employee.position || '—'}</td><td>{employee.job_grade || '—'}</td>
                               <td><span className="role-pill">{employee.role}</span></td>
                               <td><span className={`active-pill ${employee.active ? 'is-active' : 'is-inactive'}`}>{employee.active ? 'Aktif' : 'Nonaktif'}</span></td>
-                              <td><div className="row-actions">
-                                <button type="button" className="secondary compact" onClick={() => setSelectedProfile(employee.user_id)}>Detail</button>
-                                {isHR && <button type="button" className="secondary compact" onClick={() => setEditTarget(employee.user_id)}>Edit</button>}
-                              </div></td>
+                              <td><button type="button" className="secondary compact" onClick={() => setSelectedProfile(employee.user_id)}>Detail</button></td>
                             </tr>
                           ))}
                     </tbody>
@@ -2197,6 +2236,13 @@ function Dashboard({ user, onLogout }) {
 
           {user.role === 'finance' && activeRoute !== '/home' && activeRoute !== '/profile' && (
             <section className="panel"><h2>Akses finance</h2><p className="muted">Akses laporan finance akan ditambahkan pada tahap laporan. Data karyawan pribadi tidak tersedia untuk role ini.</p></section>
+          )}
+
+          {activeRoute === '/admin/my-attendance' && (
+            <div className="page-tools">
+              <span className="eyebrow">CATATAN</span>
+              <p className="muted">Halaman ini menampilkan absensi pribadi Anda. Data seluruh karyawan ada di menu <a href="#/admin/attendance">Absensi & keterlambatan</a>.</p>
+            </div>
           )}
 
           <footer className="app-footer">Human Resources Information System · Lingkungan lokal · Data diproses sesuai peran akses</footer>

@@ -734,3 +734,106 @@ html[data-theme="dark"] .workspace-sidebar { background: #101b25; }
 html[data-theme="dark"] .content, html[data-theme="dark"] .workspace-content { background: transparent; }
 html[data-theme="dark"] .report-filters, html[data-theme="dark"] .report-downloads { color: #9fb2c2; }
 html[data-theme="dark"] .attendance-today-grid > div, html[data-theme="dark"] .kpi-goal-card { background: #14212c; border-color: #24343f; color: #c9d6e0; }
+
+/* ===== Perbaikan: garis tabel seragam (hilangkan garis putus-putus) ===== */
+.table-wrap { border: 1px solid #edf0f4; border-radius: 12px; background: #fff; }
+table { border-collapse: separate; border-spacing: 0; }
+th, td { border: 0; border-bottom: 1px solid #eef2f5; }
+thead th { border-bottom: 1px solid #e7ecf1; }
+tbody tr:last-child td { border-bottom: 0; }
+.row-actions { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+
+/* Tombol Edit berada di panel detail, bukan di tabel */
+.profile-heading-actions .secondary { white-space: nowrap; }
+
+/* ===== Jarak form izin & lembur ke tabel di bawahnya ===== */
+.leave-request-form { margin-bottom: 26px; padding-bottom: 22px; border-bottom: 1px solid #eef2f5; }
+.leave-request-form .form-actions { margin-top: 6px; margin-bottom: 4px; }
+.panel > .table-wrap + .table-wrap { margin-top: 22px; }
+
+/* ===== Field password dengan ikon mata ===== */
+.password-field { position: relative; display: block; }
+.password-field input { width: 100%; padding-right: 46px; }
+.password-toggle { position: absolute; top: 50%; right: 8px; display: grid; width: 32px; height: 32px; place-items: center; padding: 0; border: 0; border-radius: 8px; background: transparent; color: #6d7d8f; font-size: .95rem; line-height: 1; transform: translateY(-50%); cursor: pointer; }
+.password-toggle:hover { background: #eef4f4; color: #176f73; }
+.password-toggle:focus-visible { outline: 2px solid #39948e; outline-offset: 1px; }
+
+/* ===== Halaman login: tema terang/gelap konsisten ===== */
+.auth-panel-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 24px; }
+.auth-panel-top .auth-mobile-brand { margin-bottom: 0; }
+
+/* ===== Garis putus-putus 'Kelola data' dibuat seragam ===== */
+.page-tools { border: 1px solid #e3ebef; border-radius: 12px; background: #fafcfd; }
+.page-tools .eyebrow { color: #42837e; }
+.exam-hr-notes { border: 1px solid #e3ebef; }
+
+/* ===== Tema gelap: tabel Direktori karyawan & komponen lain ===== */
+html[data-theme="dark"] .table-wrap { background: #14212c; border-color: #263846; }
+html[data-theme="dark"] th, html[data-theme="dark"] td { border: 0; border-bottom: 1px solid #223543; color: #c6d5e1; }
+html[data-theme="dark"] thead th { background: #182836; border-bottom: 1px solid #2a3d4c; color: #a9bdcb; }
+html[data-theme="dark"] tbody tr:last-child td { border-bottom: 0; }
+html[data-theme="dark"] td strong { color: #e8f0f6; }
+html[data-theme="dark"] td .subtext, html[data-theme="dark"] td small { color: #93a8b8; }
+html[data-theme="dark"] tbody tr:hover td { background: #172936; }
+html[data-theme="dark"] .role-pill { background: #1d3240; color: #a8cfdd; }
+html[data-theme="dark"] .row-actions .secondary, html[data-theme="dark"] .profile-heading-actions .secondary { background: #1c2f3d; border-color: #2e4553; color: #d2e3ee; }
+html[data-theme="dark"] .row-actions .secondary:hover, html[data-theme="dark"] .profile-heading-actions .secondary:hover { background: #243c4c; }
+html[data-theme="dark"] .leave-request-form { border-bottom-color: #223543; }
+html[data-theme="dark"] .page-tools { border-color: #263846; background: #15242f; }
+html[data-theme="dark"] .page-tools .eyebrow { color: #7fb9b2; }
+html[data-theme="dark"] .password-toggle { color: #93a8b8; }
+html[data-theme="dark"] .password-toggle:hover { background: #1e3240; color: #8fe3d6; }
+html[data-theme="dark"] .profile-grid div, html[data-theme="dark"] .attendance-today-grid div { background: #14212c; border-color: #253948; }
+html[data-theme="dark"] .employee-profile-grid div span { color: #93a8b8; }
+html[data-theme="dark"] .employee-profile-grid div strong { color: #e8f0f6; }
+
+/* Halaman auth (login & ganti password) — mode gelap */
+html[data-theme="dark"] .auth-page { background: #0c151d; }
+html[data-theme="dark"] .auth-layout { background: #101c26; border-color: #22323f; box-shadow: 0 24px 60px rgba(0, 0, 0, .45); }
+html[data-theme="dark"] .auth-panel { background: #101c26; color: #c6d5e1; }
+html[data-theme="dark"] .auth-panel h2 { color: #edf4f9; }
+html[data-theme="dark"] .auth-panel .intro { color: #9fb2c2; }
+html[data-theme="dark"] .auth-panel label { color: #a9bdcb; }
+html[data-theme="dark"] .auth-panel input { background: #16242f; border: 1px solid #2b3f4d; color: #e4eef5; }
+html[data-theme="dark"] .auth-panel input::placeholder { color: #6f8494; }
+html[data-theme="dark"] .auth-panel input:focus { border-color: #3f9d95; box-shadow: 0 0 0 3px rgba(63, 157, 149, .18); }
+html[data-theme="dark"] .auth-security-note { color: #93a8b8; border-color: #22323f; }
+html[data-theme="dark"] .auth-panel footer { color: #7d92a2; }
+html[data-theme="dark"] .auth-mobile-brand { color: #e7eef4; }
+html[data-theme="dark"] .auth-eyebrow { color: #7fb9b2; }
+
+@media (max-width: 760px) {
+  .auth-panel-top { margin-bottom: 20px; }
+}
+
+/* Tombol tema di halaman login (tanpa latar kotak terang) */
+.auth-panel-top .theme-toggle { background: transparent; border-color: #dce5eb; color: #42576a; }
+.auth-panel-top .theme-toggle:hover { background: #f2f7f6; border-color: #b9d8d2; }
+html[data-theme="dark"] .auth-panel-top .theme-toggle { background: transparent; border-color: #2b3f4d; color: #c6d5e1; }
+html[data-theme="dark"] .auth-panel-top .theme-toggle:hover { background: #16242f; border-color: #3b5767; }
+
+/* Avatar & badge minor: seragam di mode gelap */
+html[data-theme="dark"] .employee-avatar.profile-avatar-button { border-color: #1b2b37; background: linear-gradient(145deg, #1d3a3c, #16302f); color: #9fe0d5; }
+html[data-theme="dark"] .profile-hero-copy .subtext { color: #93a8b8; }
+
+/* Jarak tombol ajukan ke tabel di bawahnya (disempurnakan) */
+.leave-request-form { margin-bottom: 34px; padding-bottom: 28px; }
+.leave-request-form .form-actions { margin-top: 14px; margin-bottom: 0; }
+.leave-request-form textarea { min-height: 76px; }
+html[data-theme="dark"] .leave-request-form + .table-wrap { margin-top: 4px; }
+
+/* Ikon tema berbasis SVG (tidak bergantung font emoji) */
+.theme-icon { width: 15px; height: 15px; flex: 0 0 15px; display: block; }
+.theme-toggle { padding: 7px 12px 7px 9px; }
+.theme-toggle-label { margin-left: 2px; }
+
+/* Panel & kartu: hindari konten menempel di tepi (terlihat terpotong) */
+.panel { padding: 24px 26px; }
+.panel .section-heading:first-child { margin-top: 0; }
+.panel > .table-wrap { margin-top: 4px; }
+.attendance-today-grid { gap: 12px; }
+.leave-request-form .form-actions .primary { min-height: 44px; padding-inline: 24px; }
+
+@media (max-width: 760px) {
+  .panel { padding: 18px 16px; }
+}
